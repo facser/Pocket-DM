@@ -1,0 +1,3176 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pocket DM — D&D 5e 單人虛擬桌遊 (The Delian Tomb)</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- Three.js r128 核心 CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Three.js r128 GLTFLoader CDN (用於載入外部 .glb / .gltf 模型) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <!-- Three.js r128 SkeletonUtils CDN (確保帶骨架 SkinnedMesh 的哥布林/騎士 .glb 模型可正確 clone) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
+  <!-- Three.js r128 GLTFExporter CDN (用於當預設網址未替換時，動態封裝真實二進位 .glb 供 GLTFLoader 載入) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+  <!-- Google Fonts: Inter & Cinzel for Fantasy VTT Feel -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
+            display: ['Cinzel', 'Noto Sans TC', 'serif']
+          },
+          colors: {
+            dungeon: {
+              950: '#070a12',
+              900: '#0d1322',
+              800: '#172036',
+              700: '#243252'
+            },
+            gold: {
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #070a12;
+      font-family: 'Inter', 'Noto Sans TC', sans-serif;
+    }
+    #vtt-canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+      cursor: grab;
+    }
+    #vtt-canvas-container:active {
+      cursor: grabbing;
+    }
+    /* Custom scrollbar for DM narrative & dice log */
+    .custom-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: rgba(13, 19, 34, 0.6);
+      border-radius: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(245, 158, 11, 0.45);
+      border-radius: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(245, 158, 11, 0.75);
+    }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 12px rgba(245, 158, 11, 0.35); }
+      50% { box-shadow: 0 0 22px rgba(245, 158, 11, 0.7); }
+    }
+    .combat-glow {
+      animation: pulse-glow 2s infinite;
+    }
+    @keyframes stealth-pulse {
+      0%, 100% { box-shadow: 0 0 12px rgba(16, 185, 129, 0.35); }
+      50% { box-shadow: 0 0 22px rgba(16, 185, 129, 0.75); }
+    }
+    .stealth-glow {
+      animation: stealth-pulse 2s infinite;
+    }
+    @keyframes float-up {
+      0% { opacity: 1; transform: translate(-50%, 0) scale(0.95); }
+      100% { opacity: 0; transform: translate(-50%, -36px) scale(1.1); }
+    }
+    .floating-dmg {
+      position: absolute;
+      pointer-events: none;
+      animation: float-up 1.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      z-index: 40;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
+    }
+    .token-label {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+  </style>
+</head>
+<body class="bg-dungeon-950 text-slate-100 antialiased">
+
+  <!-- 0. 全螢幕黑色 Loading 載入畫面 (當所有 GLTF 模型載入完畢後淡出隱藏) -->
+  <div id="ui-loading-screen" class="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-6 transition-opacity duration-700 opacity-100">
+    <div class="max-w-md w-full bg-slate-900/95 border border-amber-500/40 rounded-2xl p-6 shadow-2xl text-center">
+      <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-amber-500/20 to-blue-600/20 border border-amber-400/60 flex items-center justify-center shadow-lg">
+        <span class="text-3xl animate-bounce">⚔️</span>
+      </div>
+      <h1 class="font-display font-bold text-xl sm:text-2xl text-amber-300 tracking-wider">POCKET DM</h1>
+      <p class="text-xs text-slate-400 mt-1">The Delian Tomb — Three.js r128 GLTFLoader 載入中</p>
+
+      <!-- 進度條 -->
+      <div class="mt-6 w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-700">
+        <div id="ui-loading-bar" class="h-full bg-gradient-to-r from-amber-500 via-yellow-400 to-emerald-400 transition-all duration-300" style="width: 0%;"></div>
+      </div>
+
+      <div class="mt-2.5 flex items-center justify-between text-xs font-mono">
+        <span id="ui-loading-status" class="text-slate-300 truncate">正在初始化 ModelLoader...</span>
+        <span id="ui-loading-percent" class="text-amber-400 font-bold">0%</span>
+      </div>
+
+      <!-- 模型清單狀態 -->
+      <div class="mt-4 pt-3 border-t border-slate-800 text-left space-y-1.5 text-[11px] font-mono text-slate-400">
+        <div class="flex items-center justify-between">
+          <span>🛡️ URL_MODEL_PLAYER (主角騎士)</span>
+          <span id="load-tag-player" class="text-amber-400">等待載入...</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span>👺 URL_MODEL_GOBLIN (哥布林敵人)</span>
+          <span id="load-tag-goblin" class="text-amber-400">等待載入...</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span>🔥 URL_MODEL_CAMPFIRE (精緻營火堆)</span>
+          <span id="load-tag-campfire" class="text-amber-400">等待載入...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自訂外部 .glb 模型網址設定彈窗 (可於執行期即時測試替換 URL) -->
+  <div id="ui-model-url-modal" class="hidden fixed inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="max-w-lg w-full bg-slate-900 border border-amber-500/50 rounded-2xl p-5 shadow-2xl pointer-events-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+        <h3 class="font-display font-bold text-base text-amber-300 flex items-center gap-2">
+          <span>📦</span> GLTFLoader 外部 .glb 模型網址設定
+        </h3>
+        <button id="btn-close-model-modal" type="button" class="text-slate-400 hover:text-white text-sm px-2 py-0.5 rounded bg-slate-800">✕</button>
+      </div>
+      <p class="text-xs text-slate-300 mb-3 leading-relaxed">
+        你可以直接在程式碼頂端修改 <code class="text-amber-300">URL_MODEL_PLAYER</code>、<code class="text-amber-300">URL_MODEL_GOBLIN</code>、<code class="text-amber-300">URL_MODEL_CAMPFIRE</code> 三個常數，或於下方輸入你的 GitHub Pages / CDN <code class="text-sky-300">.glb</code> 網址立即重新載入：
+      </p>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 font-mono mb-1">URL_MODEL_PLAYER (主角騎士 .glb)：</label>
+          <input id="input-url-player" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono text-xs focus:border-amber-400 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-slate-400 font-mono mb-1">URL_MODEL_GOBLIN (哥布林敵人 .glb)：</label>
+          <input id="input-url-goblin" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono text-xs focus:border-amber-400 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-slate-400 font-mono mb-1">URL_MODEL_CAMPFIRE (精緻營火堆 .glb)：</label>
+          <input id="input-url-campfire" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono text-xs focus:border-amber-400 focus:outline-none" />
+        </div>
+      </div>
+      <div class="mt-5 flex items-center justify-end gap-2">
+        <button id="btn-cancel-model-modal" type="button" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold">取消</button>
+        <button id="btn-apply-model-urls" type="button" class="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-lg">套用並重新載入 .glb</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. 底層：全螢幕 Three.js Canvas -->
+  <div id="vtt-canvas-container"></div>
+
+  <!-- 3D 棋子頭頂動態標籤層 (HP Bar & 名稱與視野/距離提示) -->
+  <div id="world-labels-layer" class="fixed inset-0 pointer-events-none z-10 overflow-hidden"></div>
+
+  <!-- 2. 上層：絕對定位 (absolute) 的 Tailwind UI -->
+  <div class="fixed inset-0 pointer-events-none z-20 flex flex-col justify-between p-2.5 sm:p-4 md:p-5">
+
+    <!-- ==================== 上方：角色狀態卡（HP、屬性、道具）與模式/視角控制 ==================== -->
+    <header class="w-full max-w-6xl mx-auto flex flex-col lg:flex-row items-stretch lg:items-start justify-between gap-2.5 pointer-events-auto">
+      
+      <!-- 左側：角色狀態卡 (Character Status Card) -->
+      <div class="bg-slate-900/85 backdrop-blur-md border border-amber-500/35 rounded-xl p-3 sm:p-3.5 shadow-2xl flex-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        
+        <!-- 角色頭像、名稱與 HP 條 -->
+        <div class="flex items-center gap-3">
+          <div class="relative w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-900 border-2 border-amber-400/80 flex items-center justify-center shadow-lg shrink-0">
+            <svg class="w-7 h-7 text-blue-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3l7 4v5c0 5-3.5 8.5-7 9-3.5-.5-7-4-7-9V7l7-4z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v8m-3-5h6" />
+            </svg>
+            <span class="absolute -bottom-1.5 -right-1.5 bg-amber-500 text-slate-950 text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border border-slate-900">Lv.1</span>
+          </div>
+
+          <div class="min-w-[155px]">
+            <div class="flex items-center gap-2">
+              <h1 class="font-display font-bold text-sm sm:text-base text-amber-300 tracking-wide">艾登・瓦倫 (Aiden)</h1>
+              <span class="text-[11px] bg-blue-950/90 text-blue-300 border border-blue-500/40 px-1.5 py-0.5 rounded font-medium">人類戰士</span>
+            </div>
+
+            <!-- HP Bar -->
+            <div class="mt-1.5">
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-300 font-semibold flex items-center gap-1">
+                  <span class="text-rose-400">♥</span> HP 生命值
+                </span>
+                <span id="ui-hp-text" class="font-mono font-bold text-emerald-400">12 / 12</span>
+              </div>
+              <div class="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-700/80">
+                <div id="ui-hp-bar" class="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300" style="width: 100%;"></div>
+              </div>
+            </div>
+
+            <!-- 座標與護甲 AC -->
+            <div class="mt-1.5 flex items-center gap-3 text-[11px] text-slate-400">
+              <span>🛡️ 護甲 AC: <strong id="ui-ac-text" class="text-slate-100">16</strong></span>
+              <span>📍 網格座標: <strong id="ui-pos-text" class="text-blue-300 font-mono">(0, 0)</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中間：DND 5e 核心屬性區 (Ability Scores) -->
+        <div class="grid grid-cols-4 gap-1.5 sm:gap-2 border-t sm:border-t-0 sm:border-l border-slate-700/70 pt-2 sm:pt-0 sm:pl-3">
+          <div class="bg-slate-950/80 border border-slate-800 rounded-lg px-2 py-1 text-center">
+            <div class="text-[10px] text-slate-400 font-medium">力量 STR</div>
+            <div class="text-xs sm:text-sm font-bold text-amber-400">+3</div>
+            <div class="text-[10px] text-slate-500 font-mono">16</div>
+          </div>
+          <div class="bg-slate-950/80 border border-slate-800 rounded-lg px-2 py-1 text-center">
+            <div class="text-[10px] text-slate-400 font-medium">敏捷 DEX</div>
+            <div class="text-xs sm:text-sm font-bold text-emerald-400">+2</div>
+            <div class="text-[10px] text-slate-500 font-mono">14</div>
+          </div>
+          <div class="bg-slate-950/80 border border-slate-800 rounded-lg px-2 py-1 text-center">
+            <div class="text-[10px] text-slate-400 font-medium">體質 CON</div>
+            <div class="text-xs sm:text-sm font-bold text-sky-400">+2</div>
+            <div class="text-[10px] text-slate-500 font-mono">14</div>
+          </div>
+          <div class="bg-slate-950/80 border border-slate-800 rounded-lg px-2 py-1 text-center">
+            <div class="text-[10px] text-slate-400 font-medium">感知 WIS</div>
+            <div class="text-xs sm:text-sm font-bold text-purple-400">+1</div>
+            <div class="text-[10px] text-slate-500 font-mono">12</div>
+          </div>
+        </div>
+
+        <!-- 右側：道具欄與潛行切換 (Inventory & Stealth State) -->
+        <div class="border-t sm:border-t-0 sm:border-l border-slate-700/70 pt-2 sm:pt-0 sm:pl-3 flex flex-col justify-center">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1">隨身裝備與戰術狀態</div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span id="ui-weapon-badge" class="inline-flex items-center gap-1 text-xs bg-slate-800/90 text-slate-200 border border-slate-600/70 px-2 py-1 rounded-md" title="近戰武器：射程 1 格 (5呎)，傷害 1d8+3">
+              ⚔️ 長劍 <span class="text-amber-400 font-mono text-[11px]">(1d8+3)</span>
+            </span>
+            <button id="btn-use-potion" type="button" class="inline-flex items-center gap-1 text-xs bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-500/50 px-2 py-1 rounded-md transition active:scale-95 cursor-pointer" title="點擊飲用治療藥水：恢復 2d4+2 HP">
+              🧪 治療藥水 <span id="ui-potion-count" class="bg-rose-500 text-white font-bold px-1 rounded text-[10px]">1</span>
+            </button>
+            <!-- 潛行狀態切換按鈕 (顯示敵人視野範圍) -->
+            <button id="btn-toggle-stealth" type="button" class="inline-flex items-center gap-1 text-xs bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/60 px-2 py-1 rounded-md transition active:scale-95 cursor-pointer" title="切換潛行狀態：在 3D 地面顯示敵人的紅色扇形視野範圍">
+              👁️ <span id="ui-stealth-btn-text">潛行視野：開啟</span>
+            </button>
+            <span id="badge-stealth-buff" class="hidden items-center gap-1 text-xs bg-emerald-950/90 text-emerald-300 border border-emerald-500/50 px-2 py-1 rounded-md">
+              🗡️ 暗殺奇襲優勢
+            </span>
+            <span id="badge-delian-relic" class="hidden items-center gap-1 text-xs bg-amber-950/90 text-amber-300 border border-amber-400/60 px-2 py-1 rounded-md">
+              ✨ 迪利安聖物
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右側頂部：遊戲狀態機徽章 & 視角旋轉控制面板 & 戰鬥資源面板 -->
+      <div class="flex flex-col items-stretch lg:items-end justify-between gap-2">
+        
+        <!-- 模式切換顯示與系統工具按鈕 -->
+        <div class="bg-slate-900/85 backdrop-blur-md border border-slate-700/80 rounded-xl px-3 py-2 shadow-xl flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span id="mode-indicator-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <div>
+              <div class="text-[10px] text-slate-400 leading-none">目前狀態機</div>
+              <div id="ui-game-mode" class="text-xs sm:text-sm font-bold text-emerald-300 tracking-wide">探索・潛行中 (Stealth)</div>
+            </div>
+          </div>
+
+          <div class="h-5 w-px bg-slate-700/80 mx-0.5"></div>
+
+          <!-- 3D 視角旋轉控制按鈕組 (Camera Orbit Controls) -->
+          <div class="flex items-center gap-1" title="可使用滑鼠拖曳畫面、滾輪縮放、或按 Q/E 鍵旋轉視角">
+            <button id="btn-cam-left" type="button" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-600/70 transition text-xs font-bold active:scale-95" title="向左旋轉視角 (快捷鍵 Q / ←)">
+              ⟲ 左轉
+            </button>
+            <button id="btn-cam-reset" type="button" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600/70 transition text-[11px] font-mono active:scale-95" title="重置等距視角 (快捷鍵 R)">
+              🧭 <span id="ui-cam-angle">45°</span>
+            </button>
+            <button id="btn-cam-right" type="button" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-600/70 transition text-xs font-bold active:scale-95" title="向右旋轉視角 (快捷鍵 E / →)">
+              右轉 ⟳
+            </button>
+          </div>
+
+          <div class="h-5 w-px bg-slate-700/80 mx-0.5"></div>
+
+          <!-- 模型網址設定、音效開關與劇本重置 -->
+          <div class="flex items-center gap-1.5">
+            <button id="btn-open-model-modal" type="button" class="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 transition text-xs font-semibold" title="檢視或替換 GLTFLoader .glb 模型網址">
+              📦 模型網址
+            </button>
+            <button id="btn-toggle-audio" type="button" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600/60 transition text-xs" title="切換合成音效">
+              🔊
+            </button>
+            <button id="btn-reset-game" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 transition text-xs font-semibold flex items-center gap-1" title="重新載入迪利安之墓">
+              ↺ 重置劇本
+            </button>
+          </div>
+        </div>
+
+        <!-- 戰鬥模式專用資源條 (動作 Action & 移動力 6格) -->
+        <div id="combat-resource-panel" class="hidden bg-slate-900/90 backdrop-blur-md border-2 border-rose-500/70 rounded-xl px-3.5 py-2 shadow-2xl combat-glow flex items-center gap-3">
+          <div class="text-xs font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1">
+            <span>⚔️</span> 第 <span id="ui-turn-number" class="font-mono text-sm text-white">1</span> 回合
+          </div>
+          <div class="h-4 w-px bg-slate-700"></div>
+          <div class="flex items-center gap-1.5 text-xs">
+            <span class="text-slate-300">動作:</span>
+            <span id="ui-action-Points" class="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400 text-amber-300 font-mono font-bold">1 / 1</span>
+          </div>
+          <div class="flex items-center gap-1.5 text-xs">
+            <span class="text-slate-300">移動力:</span>
+            <span id="ui-move-points" class="px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400 text-sky-300 font-mono font-bold">6 / 6 格</span>
+          </div>
+        </div>
+      </div>
+
+    </header>
+
+    <!-- 中央偏上：距離過遠、視野警告或規則提示 Toast -->
+    <div id="ui-rule-toast" class="pointer-events-none self-center transition-all duration-300 opacity-0 -translate-y-2 bg-rose-950/95 border border-rose-500 text-rose-200 px-4 py-2 rounded-xl shadow-2xl text-xs sm:text-sm font-medium flex items-center gap-2">
+      <span>⚠️</span>
+      <span id="ui-rule-toast-text">距離目標超過 1 格 (5呎)，無法進行近戰攻擊！</span>
+    </div>
+
+    <!-- ==================== 下方：DM 敘事/劇情對話框、擲骰紀錄與互動按鈕區 ==================== -->
+    <footer class="w-full max-w-5xl mx-auto flex flex-col gap-2.5 pointer-events-auto">
+      
+      <!-- 操控提示小條 -->
+      <div class="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-slate-300/90 drop-shadow">
+        <div class="flex items-center gap-2 bg-slate-900/75 backdrop-blur px-2.5 py-1 rounded-lg border border-slate-700/60">
+          <span class="text-amber-400">🖱️ 操作指南：</span>
+          <span id="ui-grid-hint">輕點網格移動角色｜按住滑鼠拖曳（或按 Q/E 鍵）自由旋轉 3D 視角｜滾輪縮放</span>
+        </div>
+        <div id="ui-target-status" class="bg-slate-900/75 backdrop-blur px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono">
+          🎯 目標：<span id="ui-selected-target-name" class="text-emerald-400 font-bold">哥布林斥候 A</span>
+          (<span id="ui-selected-target-dist" class="text-amber-300">距離 -- 格</span>)
+        </div>
+      </div>
+
+      <!-- 主面板：左側 DM 敘事與互動按鈕 + 右側 自動擲骰運算紀錄器 -->
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+        
+        <!-- DM 敘事對話框 & 互動按鈕區 (佔 7 欄) -->
+        <div class="md:col-span-7 bg-slate-900/90 backdrop-blur-md border border-amber-500/40 rounded-2xl p-3.5 sm:p-4 shadow-2xl flex flex-col justify-between">
+          <div>
+            <!-- 場景標題列 -->
+            <div class="flex items-center justify-between border-b border-slate-700/80 pb-2 mb-2.5">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded">
+                  DM 地下城主敘事
+                </span>
+                <h2 id="ui-scene-title" class="font-display font-bold text-sm sm:text-base text-slate-100">
+                  場景 A (起點，Z=0)：遺跡入口
+                </h2>
+              </div>
+              <span id="ui-enemies-remaining" class="text-xs font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-600/40 px-2 py-0.5 rounded">
+                敵方存活: 2
+              </span>
+            </div>
+
+            <!-- DM 敘事內文 -->
+            <div id="ui-dm-narrative" class="text-xs sm:text-sm text-slate-200 leading-relaxed min-h-[56px] max-h-[96px] overflow-y-auto custom-scroll pr-1">
+              你來到殘破的古墓入口，兩隻哥布林正在烤火。
+            </div>
+          </div>
+
+          <!-- 互動按鈕區 (依劇情節點或戰鬥模式動態切換) -->
+          <div class="mt-3 pt-2.5 border-t border-slate-800">
+            <div class="text-[11px] text-slate-400 mb-2 font-medium flex items-center justify-between">
+              <span id="ui-action-prompt-label">請選擇你的行動：</span>
+              <span id="ui-combat-target-switcher" class="hidden text-[11px] text-amber-300">
+                點擊 3D 敵方棋子或下方按鈕切換鎖定目標
+              </span>
+            </div>
+            <div id="ui-action-buttons" class="flex flex-wrap items-center gap-2">
+              <!-- 由 JavaScript 根據 DELIAN_TOMB_SCENARIO 與狀態機動態渲染 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 自動擲骰與戰鬥運算紀錄面板 (佔 5 欄) -->
+        <div class="md:col-span-5 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 rounded-2xl p-3.5 shadow-2xl flex flex-col justify-between">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+            <div class="flex items-center gap-1.5">
+              <span class="text-base">🎲</span>
+              <h3 class="text-xs sm:text-sm font-bold text-amber-300 tracking-wide">自動擲骰檢定與戰鬥日誌</h3>
+            </div>
+            <span id="ui-last-dice-badge" class="text-[11px] font-mono bg-slate-800 text-amber-300 px-2 py-0.5 rounded border border-slate-700">
+              D20 待命
+            </span>
+          </div>
+
+          <!-- 擲骰明細列表 -->
+          <div id="ui-dice-log" class="text-xs font-mono space-y-1.5 h-[115px] sm:h-[130px] overflow-y-auto custom-scroll pr-1">
+            <!-- JS 動態插入擲骰公式紀錄 -->
+          </div>
+        </div>
+
+      </div>
+    </footer>
+  </div>
+
+  <!-- ==================== 單一檔案核心邏輯：GLTFLoader 模型管理 + DND 5e 狀態機 + 劇本 JSON + Three.js ==================== -->
+  <script>
+    /********************************************************************
+     * 【2. 預留三個外部 3D 模型 (.glb) 網址變數】
+     * 你可以直接將以下三個變數替換為真實的 GitHub Pages URL 或本地路徑，例如：
+     *   let URL_MODEL_PLAYER   = 'https://your-username.github.io/vtt-assets/knight.glb';
+     *   let URL_MODEL_GOBLIN   = 'https://your-username.github.io/vtt-assets/goblin.glb';
+     *   let URL_MODEL_CAMPFIRE = 'https://your-username.github.io/vtt-assets/campfire.glb';
+     ********************************************************************/
+    let URL_MODEL_PLAYER   = './models/knight_player.glb';   // 主角騎士 .glb 模型網址
+    let URL_MODEL_GOBLIN   = './models/goblin_enemy.glb';    // 哥布林敵人 .glb 模型網址
+    let URL_MODEL_CAMPFIRE = './models/campfire_prop.glb';   // 精緻營火堆 .glb 模型網址
+
+    /********************************************************************
+     * 統一的 ModelLoader 管理器 (非同步加載 .glb 檔案)
+     * - 使用 THREE.GLTFLoader 載入 URL_MODEL_PLAYER / URL_MODEL_GOBLIN / URL_MODEL_CAMPFIRE
+     * - 自動計算 BoundingBox 並正規化 Scale 至符合 1 格 (1 單位) 大小
+     * - 支援透過 clone (含 THREE.SkeletonUtils.clone) 複用已載入模型以節省效能
+     * - 若預設相對路徑在單檔預覽環境尚未配置實體檔案，會自動透過 GLTFExporter
+     *   將雕塑級多面體模型封裝為真實二進位 .glb Blob 交由 GLTFLoader 解析載入！
+     ********************************************************************/
+    const ModelLoader = {
+      gltfLoader: null,
+      cache: {
+        player: null,
+        goblin: null,
+        campfire: null
+      },
+
+      init() {
+        if (!this.gltfLoader && typeof THREE !== 'undefined' && THREE.GLTFLoader) {
+          this.gltfLoader = new THREE.GLTFLoader();
+        }
+      },
+
+      // 將載入完成的 GLTF 模型自動縮放至符合 1 格 (1 單位) 大小並對齊地面 Y=0
+      normalizeModelToGridUnit(gltfScene, targetHeight = 1.0, maxFootprint = 0.85) {
+        gltfScene.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(gltfScene);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+
+        if (size.y > 0.0001) {
+          const scaleY = targetHeight / size.y;
+          const maxHoriz = Math.max(size.x, size.z, 0.0001);
+          const scaleHoriz = maxFootprint / maxHoriz;
+          const finalScale = Math.min(scaleY, scaleHoriz * 1.35);
+          gltfScene.scale.multiplyScalar(finalScale);
+        }
+
+        gltfScene.updateMatrixWorld(true);
+        const alignedBox = new THREE.Box3().setFromObject(gltfScene);
+        const center = new THREE.Vector3();
+        alignedBox.getCenter(center);
+
+        gltfScene.position.x -= center.x;
+        gltfScene.position.z -= center.z;
+        gltfScene.position.y -= alignedBox.min.y;
+
+        gltfScene.traverse(node => {
+          if (node.isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+
+        const rootWrapper = new THREE.Group();
+        rootWrapper.add(gltfScene);
+        return rootWrapper;
+      },
+
+      // 建立非 Box/Cylinder 的精緻多面體雕塑模型，並匯出為二進位 .glb Blob URL 供 GLTFLoader 實地載入
+      buildSculptedMeshForGLB(key) {
+        const group = new THREE.Group();
+
+        if (key === 'player') {
+          // 聖殿騎士雕塑模型 (使用 LatheGeometry 鍛造胸甲與戰裙、Icosahedron/Octahedron 頭盔與肩甲、锥形盾與長劍)
+          const armorMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.28, metalness: 0.72 });
+          const silverMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.22, metalness: 0.88 });
+          const goldMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.25, metalness: 0.85 });
+          const cloakMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.75 });
+
+          // 鍛造戰靴與護脛 (LatheGeometry)
+          const greavePts = [
+            new THREE.Vector2(0.06, 0.0),
+            new THREE.Vector2(0.08, 0.14),
+            new THREE.Vector2(0.065, 0.32)
+          ];
+          const greaveGeo = new THREE.LatheGeometry(greavePts, 10);
+          const legL = new THREE.Mesh(greaveGeo, silverMat);
+          legL.position.set(-0.1, 0, 0);
+          const legR = new THREE.Mesh(greaveGeo, silverMat);
+          legR.position.set(0.1, 0, 0);
+          group.add(legL, legR);
+
+          // 騎士流線型胸甲 (LatheGeometry)
+          const cuirassPts = [
+            new THREE.Vector2(0.17, 0.28),
+            new THREE.Vector2(0.14, 0.42),
+            new THREE.Vector2(0.22, 0.64),
+            new THREE.Vector2(0.12, 0.76)
+          ];
+          const cuirass = new THREE.Mesh(new THREE.LatheGeometry(cuirassPts, 14), armorMat);
+          group.add(cuirass);
+
+          // 騎士披風 (Cone 半剖雕塑)
+          const cloak = new THREE.Mesh(
+            new THREE.ConeGeometry(0.28, 0.62, 10, 1, true, -Math.PI * 0.45, Math.PI * 0.9),
+            cloakMat
+          );
+          cloak.position.set(0, 0.44, 0.08);
+          cloak.rotation.x = 0.18;
+          group.add(cloak);
+
+          // 黃金稜角肩甲 (OctahedronGeometry)
+          const pauldronGeo = new THREE.OctahedronGeometry(0.13, 1);
+          const pL = new THREE.Mesh(pauldronGeo, goldMat);
+          pL.position.set(-0.24, 0.67, 0);
+          pL.scale.set(1.1, 0.85, 1.0);
+          const pR = new THREE.Mesh(pauldronGeo, goldMat);
+          pR.position.set(0.24, 0.67, 0);
+          pR.scale.set(1.1, 0.85, 1.0);
+          group.add(pL, pR);
+
+          // 騎士尖頂頭盔與羽飾 (Icosahedron + Cone)
+          const helm = new THREE.Mesh(new THREE.IcosahedronGeometry(0.155, 1), silverMat);
+          helm.position.set(0, 0.88, 0);
+          helm.scale.set(0.95, 1.12, 1.02);
+          const visor = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.14, 6), goldMat);
+          visor.position.set(0, 0.86, 0.08);
+          visor.rotation.x = Math.PI / 2;
+          const plume = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.25, 8), armorMat);
+          plume.position.set(0, 1.08, -0.05);
+          plume.rotation.x = 0.35;
+          group.add(helm, visor, plume);
+
+          // 左手鳶形騎士盾 (擠壓八面體雕塑)
+          const shield = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 1), goldMat);
+          shield.position.set(-0.29, 0.52, 0.08);
+          shield.scale.set(0.25, 1.15, 0.78);
+          shield.rotation.y = -0.3;
+          group.add(shield);
+
+          // 右手騎士聖劍 (四稜劍身 Cone + 護手 Torus)
+          const blade = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.62, 4), silverMat);
+          blade.position.set(0.29, 0.82, 0.14);
+          blade.rotation.x = 0.22;
+          const guard = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.018, 6, 12), goldMat);
+          guard.position.set(0.29, 0.52, 0.08);
+          group.add(blade, guard);
+        } else if (key === 'goblin') {
+          // 哥布林雕塑模型 (使用 Icosahedron/Cone/Lathe 組合：佝僂身軀、長尖耳、發光紅黃眼與彎刀)
+          const skinMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.55, metalness: 0.08 });
+          constragMat = new THREE.MeshStandardMaterial({ color: 0x713f12, roughness: 0.88, metalness: 0.05 });
+          const ironMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.35, metalness: 0.82 });
+          const eyeMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+
+          // 哥布林雙腿 (Cone)
+          const legGeo = new THREE.ConeGeometry(0.065, 0.26, 7);
+          const legL = new THREE.Mesh(legGeo, skinMat);
+          legL.position.set(-0.09, 0.13, 0);
+          legL.rotation.x = Math.PI;
+          const legR = new THREE.Mesh(legGeo, skinMat);
+          legR.position.set(0.09, 0.13, 0);
+          legR.rotation.x = Math.PI;
+          group.add(legL, legR);
+
+          // 佝僂皮甲軀幹 (LatheGeometry)
+          const bodyPts = [
+            new THREE.Vector2(0.15, 0.2),
+            new THREE.Vector2(0.19, 0.36),
+            new THREE.Vector2(0.13, 0.54)
+          ];
+          const torso = new THREE.Mesh(new THREE.LatheGeometry(bodyPts, 10), constagMat = const_ragMat());
+          function const_ragMat() { return new THREE.MeshStandardMaterial({ color: 0x713f12, roughness: 0.88 }); }
+          group.add(torso);
+
+          // 哥布林頭顱與誇張尖長雙耳 (Dodecahedron + Cone)
+          const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.16, 1), skinMat);
+          head.position.set(0, 0.65, 0.03);
+          const earGeo = new THREE.ConeGeometry(0.055, 0.28, 5);
+          const earL = new THREE.Mesh(earGeo, skinMat);
+          earL.position.set(-0.23, 0.68, 0.02);
+          earL.rotation.z = Math.PI * 0.42;
+          const earR = new THREE.Mesh(earGeo, skinMat);
+          earR.position.set(0.23, 0.68, 0.02);
+          earR.rotation.z = -Math.PI * 0.42;
+
+          // 邪惡發光雙眼
+          const eyeL = new THREE.Mesh(new THREE.OctahedronGeometry(0.03, 0), eyeMat);
+          eyeL.position.set(-0.06, 0.67, 0.16);
+          const eyeR = new THREE.Mesh(new THREE.OctahedronGeometry(0.03, 0), eyeMat);
+          eyeR.position.set(0.06, 0.67, 0.16);
+          group.add(head, earL, earR, eyeL, eyeR);
+
+          // 哥布林鋸齒彎刀 (四稜錐彎刀)
+          const dagger = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.42, 4), ironMat);
+          dagger.position.set(0.22, 0.48, 0.15);
+          dagger.rotation.x = 0.55;
+          group.add(dagger);
+        } else if (key === 'campfire') {
+          // 精緻營火堆模型 (Dodecahedron 岩石圈 + Cone 交錯原木 + Octahedron 餘燼結晶)
+          const rockMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.92 });
+          const woodMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.9 });
+          const emberMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+
+          for (let i = 0; i < 10; i++) {
+            const angle = (i / 10) * Math.PI * 2;
+            const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.13, 0), rockMat);
+            rock.position.set(Math.cos(angle) * 0.48, 0.08, Math.sin(angle) * 0.48);
+            rock.rotation.set(i, i * 0.7, 0);
+            group.add(rock);
+          }
+
+          const logGeo = new THREE.ConeGeometry(0.08, 0.85, 7);
+          for (let i = 0; i < 5; i++) {
+            const log = new THREE.Mesh(logGeo, woodMat);
+            log.position.y = 0.14;
+            log.rotation.z = Math.PI / 2.6;
+            log.rotation.y = (i * Math.PI * 2) / 5;
+            group.add(log);
+          }
+
+          const ember = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 1), emberMat);
+          ember.scale.set(1, 0.35, 1);
+          ember.position.y = 0.06;
+          group.add(ember);
+        }
+
+        return group;
+      },
+
+      // 將內建雕塑模型透過 GLTFExporter 轉為真實二進位 .glb Blob URL，再交由 GLTFLoader 讀取
+      exportFallbackAsGLBBlobUrl(key) {
+        return new Promise(resolve => {
+          const sculpted = this.buildSculptedMeshForGLB(key);
+          if (typeof THREE !== 'undefined' && THREE.GLTFExporter) {
+            try {
+              const exporter = new THREE.GLTFExporter();
+              exporter.parse(
+                sculpted,
+                glbArrayBuffer => {
+                  const blob = new Blob([glbArrayBuffer], { type: 'model/gltf-binary' });
+                  const blobUrl = URL.createObjectURL(blob);
+                  resolve({ blobUrl, directMesh: sculpted });
+                },
+                { binary: true }
+              );
+              return;
+            } catch (e) {}
+          }
+          resolve({ blobUrl: null, directMesh: sculpted });
+        });
+      },
+
+      // 非同步載入單一 .glb 檔案（優先請求外部 URL，若外部檔案未放置則載入動態封裝之 .glb 二進位流）
+      loadGLBModel(key, url, targetHeight, maxFootprint, onDoneCallback) {
+        return new Promise(resolve => {
+          const tagEl = document.getElementById(`load-tag-${key}`);
+          let completed = false;
+
+          const loadFromFallbackGLB = async () => {
+            if (completed) return;
+            const { blobUrl, directMesh } = await this.exportFallbackAsGLBBlobUrl(key);
+            if (blobUrl && this.gltfLoader) {
+              this.gltfLoader.load(
+                blobUrl,
+                gltf => {
+                  if (completed) return;
+                  completed = true;
+                  URL.revokeObjectURL(blobUrl);
+                  const root = gltf.scene || (gltf.scenes && gltf.scenes[0]) || directMesh;
+                  this.cache[key] = this.normalizeModelToGridUnit(root, targetHeight, maxFootprint);
+                  if (tagEl) {
+                    tagEl.textContent = '✓ GLB 已載入 (GLTFLoader)';
+                    tagEl.className = 'text-emerald-400 font-bold';
+                  }
+                  onDoneCallback();
+                  resolve(this.cache[key]);
+                },
+                undefined,
+                () => {
+                  if (completed) return;
+                  completed = true;
+                  this.cache[key] = this.normalizeModelToGridUnit(directMesh, targetHeight, maxFootprint);
+                  if (tagEl) {
+                    tagEl.textContent = '✓ 3D 模型已就緒';
+                    tagEl.className = 'text-emerald-400';
+                  }
+                  onDoneCallback();
+                  resolve(this.cache[key]);
+                }
+              );
+            } else {
+              completed = true;
+              this.cache[key] = this.normalizeModelToGridUnit(directMesh, targetHeight, maxFootprint);
+              if (tagEl) {
+                tagEl.textContent = '✓ 3D 模型已就緒';
+                tagEl.className = 'text-emerald-400';
+              }
+              onDoneCallback();
+              resolve(this.cache[key]);
+            }
+          };
+
+          if (!this.gltfLoader || !url) {
+            loadFromFallbackGLB();
+            return;
+          }
+
+          // 設定逾時保護：若外部 URL 超過 2.2 秒無回應則自動切換至內建二進位 .glb
+          const timer = setTimeout(loadFromFallbackGLB, 2200);
+
+          try {
+            this.gltfLoader.load(
+              url,
+              gltf => {
+                if (completed) return;
+                completed = true;
+                clearTimeout(timer);
+                const sceneRoot = gltf.scene || (gltf.scenes && gltf.scenes[0]);
+                if (sceneRoot) {
+                  this.cache[key] = this.normalizeModelToGridUnit(sceneRoot, targetHeight, maxFootprint);
+                  if (tagEl) {
+                    tagEl.textContent = '✓ 外部 GLB 載入成功';
+                    tagEl.className = 'text-emerald-400 font-bold';
+                  }
+                  onDoneCallback();
+                  resolve(this.cache[key]);
+                } else {
+                  completed = false;
+                  loadFromFallbackGLB();
+                }
+              },
+              xhr => {
+                if (xhr && xhr.total > 0 && tagEl) {
+                  const itemPct = Math.round((xhr.loaded / xhr.total) * 100);
+                  tagEl.textContent = `下載中 ${itemPct}%`;
+                }
+              },
+              () => {
+                clearTimeout(timer);
+                loadFromFallbackGLB();
+              }
+            );
+          } catch (err) {
+            clearTimeout(timer);
+            loadFromFallbackGLB();
+          }
+        });
+      },
+
+      // 非同步載入所有指定的 .glb 模型並驅動全螢幕黑色 Loading 畫面進度
+      async loadAllModels() {
+        this.init();
+        const barEl = document.getElementById('ui-loading-bar');
+        const pctEl = document.getElementById('ui-loading-percent');
+        const statusEl = document.getElementById('ui-loading-status');
+
+        let finished = 0;
+        const total = 3;
+        const stepProgress = modelName => {
+          finished += 1;
+          const pct = Math.round((finished / total) * 100);
+          if (barEl) barEl.style.width = `${pct}%`;
+          if (pctEl) pctEl.textContent = `${pct}%`;
+          if (statusEl) statusEl.textContent = `GLTFLoader 已載入：${modelName} (${finished}/${total})`;
+        };
+
+        if (statusEl) statusEl.textContent = '正在透過 GLTFLoader 非同步讀取 .glb 模型...';
+
+        await Promise.all([
+          this.loadGLBModel('player',   URL_MODEL_PLAYER,   1.05, 0.80, () => stepProgress('主角騎士')),
+          this.loadGLBModel('goblin',   URL_MODEL_GOBLIN,   0.85, 0.72, () => stepProgress('哥布林敵人')),
+          this.loadGLBModel('campfire', URL_MODEL_CAMPFIRE, 0.55, 0.95, () => stepProgress('精緻營火堆'))
+        ]);
+      },
+
+      // 從快取的 GLTF 模型產生獨立的 Clone 實體 (支援靜態 Mesh 與帶骨架 SkinnedMesh)
+      getClone(key, tintColorHex = null) {
+        const template = this.cache[key] || this.buildSculptedMeshForGLB(key);
+        const cloned = (typeof THREE !== 'undefined' && THREE.SkeletonUtils && THREE.SkeletonUtils.clone)
+          ? THREE.SkeletonUtils.clone(template)
+          : template.clone(true);
+
+        cloned.traverse(node => {
+          if (node.isMesh && node.material) {
+            node.material = node.material.clone();
+            if (tintColorHex !== null && node.material.color) {
+              // 若為哥布林皮膚色，依不同哥布林個體染色區分
+              if (node.material.color.getHex() === 0x22c55e) {
+                node.material.color.setHex(tintColorHex);
+              }
+            }
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+        return cloned;
+      }
+    };
+
+    /********************************************************************
+     * 1. 劇本與場景初始化 JSON 物件：迪利安之墓 (The Delian Tomb)
+     *    包含 scene_a (遺跡入口 Z=0) 與 scene_b (地下獻祭室 Z=-25 ~ -45)
+     ********************************************************************/
+    const DELIAN_TOMB_SCENARIO = {
+      campaignTitle: "迪利安之墓 (The Delian Tomb)",
+      gridScaleFeet: 5, // 1 單位 = DND 1 格 (5 呎)
+      scenes: {
+        scene_a: {
+          id: "scene_a",
+          title: "場景 A (起點，Z=0)：遺跡入口",
+          originZ: 0,
+          environment: {
+            backgroundColor: 0x050811,
+            ambientLightColor: 0x3b6fd8, // 藍色環境光
+            ambientIntensity: 0.75,
+            campfireLightColor: 0xff7b1a, // 橘色 PointLight 代表營火
+            campfirePos: { x: 0, y: 0.85, z: -4 }
+          },
+          playerStart: { x: 0, z: 0 },
+          enemies: [
+            {
+              id: "goblin_1",
+              name: "哥布林斥候 A",
+              gridX: -1,
+              gridZ: -4,
+              hp: 7,
+              maxHp: 7,
+              ac: 12,
+              atkBonus: 4,
+              dmgDice: 6,
+              dmgMod: 2,
+              color: 0x22c55e,
+              baseFacingAngle: Math.PI * 0.38,
+              visionRange: 3.4,
+              visionAngle: Math.PI * 0.55
+            },
+            {
+              id: "goblin_2",
+              name: "哥布林哨兵 B",
+              gridX: 1,
+              gridZ: -4,
+              hp: 7,
+              maxHp: 7,
+              ac: 12,
+              atkBonus: 4,
+              dmgDice: 6,
+              dmgMod: 2,
+              color: 0x16a34a,
+              baseFacingAngle: Math.PI * 0.62,
+              visionRange: 3.4,
+              visionAngle: Math.PI * 0.55
+            }
+          ],
+          nodes: {
+            entrance_start: {
+              id: "entrance_start",
+              text: "你來到殘破的古墓入口，兩隻哥布林正在烤火。目前處於【潛行狀態】，地面上紅色扇形區域為哥布林的【視野警戒範圍】。你可以繞過視野死角移動靠近，或直接選擇下方行動：",
+              options: [
+                {
+                  id: "opt_frontal_assault",
+                  label: "1. [戰鬥] 正面突襲",
+                  style: "combat",
+                  action: "ENTER_COMBAT_DIRECT"
+                },
+                {
+                  id: "opt_stealth_assassinate",
+                  label: "2. [敏捷檢定] 潛行暗殺 (DC 12)",
+                  style: "skill",
+                  action: "SKILL_CHECK_STEALTH"
+                },
+                {
+                  id: "opt_toggle_stealth_cone",
+                  label: "👁️ 切換潛行視野範圍顯示",
+                  style: "secondary",
+                  action: "TOGGLE_STEALTH_MODE"
+                }
+              ]
+            },
+            combat_active: {
+              id: "combat_active",
+              text: "【戰鬥模式進行中】每回合擁有 1 次【動作】與 【6 格 (30呎) 移動力】。請點擊網格移動至敵人身旁（距離 1 格內），再點擊「近戰攻擊」揮動長劍！"
+            },
+            victory_cleared: {
+              id: "victory_cleared",
+              text: "營火旁的兩隻哥布林皆已倒下！你在營火旁的破布袋裡找到了幾枚銀幣與通往古墓深處的石階入口。迪利安騎士團的古老封印就在前方。",
+              options: [
+                {
+                  id: "opt_descend_stairs",
+                  label: "🔦 舉起火把，走下陰暗的古墓石階",
+                  style: "explore",
+                  action: "GOTO_SCENE_B"
+                },
+                {
+                  id: "opt_short_rest",
+                  label: "🔥 在營火旁短休 (恢復滿 HP 與藥水)",
+                  style: "skill",
+                  action: "SHORT_REST"
+                },
+                {
+                  id: "opt_spawn_reinforcement",
+                  label: "⚔️ 挑戰哥布林巡邏隊 (再次進入戰鬥)",
+                  style: "combat",
+                  action: "SPAWN_PATROL"
+                },
+                {
+                  id: "opt_reset_scenario",
+                  label: "↺ 重新體驗起點劇情",
+                  style: "secondary",
+                  action: "RESET_SCENARIO"
+                }
+              ]
+            },
+            player_defeated: {
+              id: "player_defeated",
+              text: "你在敵人的圍攻下力竭倒地，意識逐漸模糊……但命運之神給予了你再次挑戰迪利安之墓的機會。",
+              options: [
+                {
+                  id: "opt_revive",
+                  label: "✨ 重新甦醒並重啟冒險",
+                  style: "combat",
+                  action: "RESET_SCENARIO"
+                }
+              ]
+            }
+          }
+        },
+
+        // ==================== 場景 B (Z = -25 ~ -45) 地下獻祭室 ====================
+        scene_b: {
+          id: "scene_b",
+          title: "場景 B (Z=-25 ~ -45)：古墓石門與地下獻祭室",
+          originZ: -25,
+          playerStart: { x: 0, z: -25 },
+          chamberLightPos: { x: 0, y: 3.8, z: -35 },
+          enemies: [],
+          nodes: {
+            stairs_stone_door: {
+              id: "stairs_stone_door",
+              text: "你舉起火把，沿著陰暗潮濕的石階一路向下（抵達座標 Z = -25）。前方 Z = -30 處矗立著一扇厚重的古老石門，門後被濃重的黑暗（戰爭迷霧）籠罩，隱約傳來古老封印的低鳴。",
+              options: [
+                {
+                  id: "opt_push_stone_door",
+                  label: "🚪 推開石門進入獻祭室",
+                  style: "explore",
+                  action: "PUSH_OPEN_STONE_DOOR"
+                },
+                {
+                  id: "opt_inspect_door",
+                  label: "🔍 [感知檢定] 聆聽石門後的動靜 (DC 11)",
+                  style: "skill",
+                  action: "INSPECT_STONE_DOOR"
+                }
+              ]
+            },
+            push_door_chamber: {
+              id: "push_door_chamber",
+              text: "伴隨著沉重的石塊摩擦聲，你推開了石門！Z = -35 處亮起微弱的白色光芒，照亮了 Z = -30 到 -45 的灰色石室：三面高牆與四根石柱環繞四周，盡頭矗立著一尊高大的藍黑色騎士雕像。當你準備踏入石室中央時，腳下石板似乎有些異樣……",
+              options: [
+                {
+                  id: "opt_step_pressure_plate",
+                  label: "👣 踏入石室中央（觸發壓力板陷阱）",
+                  style: "combat",
+                  action: "TRIGGER_PRESSURE_PLATE"
+                },
+                {
+                  id: "opt_approach_statue_direct",
+                  label: "🗿 走近盡頭的藍黑色雕像（雕像誓言解謎）",
+                  style: "explore",
+                  action: "GO_TO_STATUE_PUZZLE"
+                }
+              ]
+            },
+            pressure_plate_trap: {
+              id: "pressure_plate_trap",
+              text: "咔嚓！你踩中了石室中央（Z = -36）的古老壓力板陷阱！兩側石柱的暗孔瞬間射出淬毒飛箭，擦傷了你的肩膀（已扣除生命值）！你忍痛穿過四根石柱，來到盡頭高大的藍黑色雕像（Z = -41）前。",
+              options: [
+                {
+                  id: "opt_after_trap_puzzle",
+                  label: "📜 檢視藍黑色雕像基座（雕像誓言解謎選項）",
+                  style: "explore",
+                  action: "GO_TO_STATUE_PUZZLE"
+                },
+                {
+                  id: "opt_drink_potion_in_b",
+                  label: "🧪 先飲用治療藥水包紮傷口",
+                  style: "skill",
+                  action: "DRINK_POTION_NODE"
+                }
+              ]
+            },
+            statue_oath_puzzle: {
+              id: "statue_oath_puzzle",
+              text: "你站在獻祭室盡頭的高大藍黑色騎士雕像前（Z = -41）。雕像手中拄著巨劍，基座刻著古帝國銘文：『凡踏入迪利安聖殿者，須立下騎士團之不朽誓言，方得聖劍庇護；偽誓者將受懲戒。』請選擇你的雕像誓言：",
+              options: [
+                {
+                  id: "opt_oath_correct",
+                  label: "1. 🛡️ 宣誓：「我誓言守護無辜，對抗黑暗，至死方休！」",
+                  style: "skill",
+                  action: "OATH_SOLVE_SUCCESS"
+                },
+                {
+                  id: "opt_oath_wrong_greed",
+                  label: "2. 💰 宣誓：「唯黃金與王權永存，萬物皆歸勝者！」",
+                  style: "combat",
+                  action: "OATH_SOLVE_FAIL_TRAP"
+                },
+                {
+                  id: "opt_oath_wrong_blood",
+                  label: "3. 💀 宣誓：「以鮮血獻祭深淵，喚醒沉睡的亡魂！」",
+                  style: "combat",
+                  action: "OATH_SOLVE_FAIL_GUARDIAN"
+                }
+              ]
+            },
+            oath_solved_victory: {
+              id: "oath_solved_victory",
+              text: "莊嚴的誓言在石室中迴盪！藍黑色雕像雙眼綻放出神聖的湛藍光芒，沉重的石製基座緩緩開啟，露出了失落已久的【迪利安聖光長劍 (+1)】與騎士團秘寶！你成功解開了《迪利安之墓》的所有謎團！",
+              options: [
+                {
+                  id: "opt_claim_holy_sword",
+                  label: "✨ 佩上迪利安聖光長劍並完全恢復 HP",
+                  style: "explore",
+                  action: "CLAIM_DELIAN_REWARD"
+                },
+                {
+                  id: "opt_replay_full",
+                  label: "↺ 重新開始《迪利安之墓》完整冒險",
+                  style: "secondary",
+                  action: "RESET_SCENARIO"
+                }
+              ]
+            },
+            combat_active: {
+              id: "combat_active",
+              text: "【獻祭室戰鬥模式】墓室守衛已被喚醒！每回合擁有 1 次【動作】與【6 格移動力】，請移動至敵人 1 格內進行近戰攻擊！"
+            },
+            player_defeated: {
+              id: "player_defeated",
+              text: "你在地下獻祭室的試煉中力竭倒地……但迪利安騎士的意志讓你得以重新挑戰。",
+              options: [
+                {
+                  id: "opt_revive_b",
+                  label: "✨ 重新甦醒並重啟冒險",
+                  style: "combat",
+                  action: "RESET_SCENARIO"
+                }
+              ]
+            }
+          }
+        }
+      }
+    };
+
+    /********************************************************************
+     * 2. Web Audio 合成音效系統 (零外部音檔依賴)
+     ********************************************************************/
+    const SoundFX = {
+      ctx: null,
+      muted: false,
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      },
+      playTone(freq, type = 'sine', duration = 0.12, gainVal = 0.12) {
+        if (this.muted) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {}
+      },
+      step() { this.playTone(190, 'triangle', 0.07, 0.08); },
+      dice() {
+        this.playTone(520, 'square', 0.06, 0.07);
+        setTimeout(() => this.playTone(680, 'square', 0.08, 0.07), 65);
+      },
+      hit() {
+        this.playTone(140, 'sawtooth', 0.18, 0.16);
+        setTimeout(() => this.playTone(95, 'sawtooth', 0.22, 0.14), 50);
+      },
+      miss() {
+        this.playTone(300, 'sine', 0.12, 0.08);
+        setTimeout(() => this.playTone(210, 'sine', 0.15, 0.07), 70);
+      },
+      stealthKill() {
+        this.playTone(620, 'triangle', 0.12, 0.14);
+        setTimeout(() => this.playTone(880, 'triangle', 0.25, 0.14), 90);
+      },
+      stoneDoor() {
+        this.playTone(85, 'sawtooth', 0.35, 0.18);
+        setTimeout(() => this.playTone(110, 'triangle', 0.35, 0.15), 140);
+      },
+      trap() {
+        this.playTone(280, 'sawtooth', 0.12, 0.18);
+        setTimeout(() => this.playTone(120, 'sawtooth', 0.25, 0.2), 60);
+      },
+      error() {
+        this.playTone(160, 'sawtooth', 0.15, 0.12);
+      },
+      victory() {
+        [440, 554, 659, 880].forEach((f, idx) => {
+          setTimeout(() => this.playTone(f, 'triangle', 0.22, 0.12), idx * 95);
+        });
+      }
+    };
+
+    /********************************************************************
+     * 3. 遊戲全域狀態機 (Game State Machine)
+     ********************************************************************/
+    const GameState = {
+      mode: 'EXPLORATION', // 'EXPLORATION' | 'COMBAT'
+      isStealth: true,     // 潛行狀態：開啟時在 3D 場景顯示敵人的扇形視野範圍
+      currentScene: 'scene_a', // 'scene_a' | 'scene_b'
+      currentNode: 'entrance_start',
+      turn: 1,
+      isEnemyTurn: false,
+      stealthAttempted: false,
+      doorOpened: false,
+      trapTriggered: false,
+      oathSolved: false,
+      holySwordEquipped: false,
+
+      player: {
+        name: '艾登 (Aiden)',
+        hp: 12,
+        maxHp: 12,
+        ac: 16,
+        strMod: 3,
+        dexMod: 2,
+        conMod: 2,
+        potions: 1,
+        gridX: 0,
+        gridZ: 0,
+        actions: 1,
+        maxActions: 1,
+        movement: 6,
+        maxMovement: 6
+      },
+
+      enemies: [],
+      selectedEnemyId: null
+    };
+
+    /********************************************************************
+     * 4. Three.js 3D 場景、可旋轉等距視角攝影機、光影與實體管理
+     ********************************************************************/
+    let scene, camera, renderer;
+    let playerMesh, playerModelContainer, playerRingMesh;
+    let campfireGroup = null, campfireLight, campfireFlameMesh;
+    let sceneBPointLight = null;
+    let sceneBGroup = null;
+    let sceneBDoorLeft = null, sceneBDoorRight = null;
+    let sceneBPressurePlateMesh = null;
+    let sceneBStatueMesh = null;
+    let hoverTileMesh, rangeRingGroup;
+    let groundPlane;
+    const enemyMeshes = new Map();
+
+    const playerTargetWorldPos = new THREE.Vector3(0, 0, 0);
+    const currentLookAt = new THREE.Vector3(0, 0.4, -1.5);
+
+    const CameraOrbit = {
+      yaw: Math.PI / 4,
+      targetYaw: Math.PI / 4,
+      pitch: 0.72,
+      targetPitch: 0.72,
+      distance: 17.5,
+      targetDistance: 17.5,
+      isDragging: false,
+      pointerDownX: 0,
+      pointerDownY: 0,
+      dragMovedDistance: 0
+    };
+
+    const raycaster = new THREE.Raycaster();
+    const mouseNDC = new THREE.Vector2();
+    let hoveredGridCell = { x: 0, z: 0, valid: false };
+
+    function initThreeJS() {
+      const container = document.getElementById('vtt-canvas-container');
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(DELIAN_TOMB_SCENARIO.scenes.scene_a.environment.backgroundColor);
+      scene.fog = new THREE.FogExp2(0x050811, 0.024);
+
+      camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 140);
+      updateCameraOrbitImmediate();
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.innerHTML = '';
+      container.appendChild(renderer.domElement);
+
+      // 光源系統：場景 B 初始為全黑戰爭迷霧，場景 A 擁有藍色環境月光與橘色營火光
+      const globalDimAmbient = new THREE.AmbientLight(0x0a101f, 0.08);
+      scene.add(globalDimAmbient);
+
+      const sceneAMoonLight = new THREE.PointLight(
+        DELIAN_TOMB_SCENARIO.scenes.scene_a.environment.ambientLightColor,
+        1.55,
+        29,
+        1.2
+      );
+      sceneAMoonLight.position.set(0, 10, -2);
+      scene.add(sceneAMoonLight);
+
+      const stairsGuideLight = new THREE.PointLight(0x3b6fd8, 0.9, 10, 1.8);
+      stairsGuideLight.position.set(0, 3.2, -23);
+      scene.add(stairsGuideLight);
+
+      const fireCfg = DELIAN_TOMB_SCENARIO.scenes.scene_a.environment;
+      campfireLight = new THREE.PointLight(fireCfg.campfireLightColor, 3.2, 16, 1.6);
+      campfireLight.position.set(fireCfg.campfirePos.x, fireCfg.campfirePos.y, fireCfg.campfirePos.z);
+      campfireLight.castShadow = true;
+      campfireLight.shadow.bias = -0.002;
+      scene.add(campfireLight);
+
+      // 地城石板地面與 THREE.GridHelper (1 單位 = DND 1 格 = 5 呎)
+      const floorGeo = new THREE.PlaneGeometry(24, 68);
+      const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x111827,
+        roughness: 0.88,
+        metalness: 0.12
+      });
+      groundPlane = new THREE.Mesh(floorGeo, floorMat);
+      groundPlane.rotation.x = -Math.PI / 2;
+      groundPlane.position.set(0, 0, -20);
+      groundPlane.receiveShadow = true;
+      scene.add(groundPlane);
+
+      const gridHelperA = new THREE.GridHelper(40, 40, 0x3b82f6, 0x1e293b);
+      gridHelperA.position.set(0.5, 0.01, -7.5);
+      gridHelperA.material.opacity = 0.6;
+      gridHelperA.material.transparent = true;
+      scene.add(gridHelperA);
+
+      // 滑鼠指向的網格高亮框
+      const hoverGeo = new THREE.PlaneGeometry(0.92, 0.92);
+      const hoverMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.38,
+        side: THREE.DoubleSide
+      });
+      hoverTileMesh = new THREE.Mesh(hoverGeo, hoverMat);
+      hoverTileMesh.rotation.x = -Math.PI / 2;
+      hoverTileMesh.position.set(0, 0.025, 0);
+      scene.add(hoverTileMesh);
+
+      // 搭建場景 A 道具 (含 GLTF 營火堆模型)、場景 B 獻祭室、與主角 GLTF 騎士模型
+      buildDungeonProps();
+      buildSceneB();
+      buildPlayerToken();
+
+      const domEl = renderer.domElement;
+      domEl.addEventListener('pointerdown', onPointerDown);
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      domEl.addEventListener('wheel', onMouseWheel, { passive: false });
+      domEl.addEventListener('contextmenu', e => e.preventDefault());
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function getCameraOffsetVector() {
+      const horizDist = CameraOrbit.distance * Math.cos(CameraOrbit.pitch);
+      const vertDist = CameraOrbit.distance * Math.sin(CameraOrbit.pitch);
+      return new THREE.Vector3(
+        Math.sin(CameraOrbit.yaw) * horizDist,
+        vertDist,
+        Math.cos(CameraOrbit.yaw) * horizDist
+      );
+    }
+
+    function updateCameraOrbitImmediate() {
+      if (!camera) return;
+      const offset = getCameraOffsetVector();
+      camera.position.copy(playerTargetWorldPos).add(offset);
+      camera.lookAt(playerTargetWorldPos);
+    }
+
+    function rotateCameraBy(deltaYaw) {
+      CameraOrbit.targetYaw += deltaYaw;
+      updateCameraAngleBadge();
+    }
+
+    function resetCameraOrbit() {
+      CameraOrbit.targetYaw = Math.PI / 4;
+      CameraOrbit.targetPitch = 0.72;
+      CameraOrbit.targetDistance = 17.5;
+      updateCameraAngleBadge();
+    }
+
+    function updateCameraAngleBadge() {
+      const deg = Math.round(((CameraOrbit.targetYaw * 180) / Math.PI) % 360);
+      const normalized = (deg + 360) % 360;
+      const badge = document.getElementById('ui-cam-angle');
+      if (badge) badge.textContent = `${normalized}°`;
+    }
+
+    // 搭建場景 A 營火（使用 ModelLoader 載入的 URL_MODEL_CAMPFIRE 模型）與遺跡石柱
+    function buildDungeonProps() {
+      if (campfireGroup) {
+        scene.remove(campfireGroup);
+      }
+      const fireZ = -4;
+      campfireGroup = new THREE.Group();
+      campfireGroup.position.set(0, 0, fireZ);
+
+      // 透過 ModelLoader 取得營火堆 .glb 模型 (URL_MODEL_CAMPFIRE)
+      const campfireModel = ModelLoader.getClone('campfire');
+      campfireModel.scale.set(1.0, 1.0, 1.0);
+      campfireGroup.add(campfireModel);
+
+      // 火焰動態光錐
+      const flameGeo = new THREE.ConeGeometry(0.26, 0.62, 7);
+      const flameMat = new THREE.MeshBasicMaterial({ color: 0xff9f1c });
+      campfireFlameMesh = new THREE.Mesh(flameGeo, flameMat);
+      campfireFlameMesh.position.y = 0.36;
+      campfireGroup.add(campfireFlameMesh);
+
+      scene.add(campfireGroup);
+
+      // 古墓入口石柱與拱門 (Z = -7 處)
+      const stoneMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        roughness: 0.85,
+        metalness: 0.1
+      });
+      const pillarPositions = [
+        { x: -3, z: -2, h: 2.2 },
+        { x: 3, z: -2, h: 1.6 },
+        { x: -3, z: -6, h: 2.8 },
+        { x: 3, z: -6, h: 2.8 },
+        { x: -1.5, z: -7, h: 3.4 },
+        { x: 1.5, z: -7, h: 3.4 }
+      ];
+      pillarPositions.forEach(p => {
+        const pillarGeo = new THREE.BoxGeometry(0.75, p.h, 0.75);
+        const pillar = new THREE.Mesh(pillarGeo, stoneMat);
+        pillar.position.set(p.x, p.h / 2, p.z);
+        pillar.castShadow = true;
+        pillar.receiveShadow = true;
+        scene.add(pillar);
+      });
+
+      const lintelGeo = new THREE.BoxGeometry(4.0, 0.6, 0.9);
+      const lintel = new THREE.Mesh(lintelGeo, stoneMat);
+      lintel.position.set(0, 3.6, -7);
+      lintel.castShadow = true;
+      scene.add(lintel);
+
+      for (let z = -10; z >= -26; z -= 4) {
+        const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, 0.5), stoneMat);
+        leftPost.position.set(-2.5, 0.7, z);
+        scene.add(leftPost);
+
+        const rightPost = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.4, 0.5), stoneMat);
+        rightPost.position.set(2.5, 0.7, z);
+        scene.add(rightPost);
+      }
+    }
+
+    // 在 Z = -30 到 -45 區域建造地下獻祭室 (初始全黑不打光)
+    function buildSceneB() {
+      if (sceneBGroup) {
+        scene.remove(sceneBGroup);
+      }
+      sceneBGroup = new THREE.Group();
+
+      const greyWallMat = new THREE.MeshStandardMaterial({
+        color: 0x6b7280,
+        roughness: 0.85,
+        metalness: 0.12
+      });
+      const greyPillarMat = new THREE.MeshStandardMaterial({
+        color: 0x9ca3af,
+        roughness: 0.78,
+        metalness: 0.15
+      });
+      const chamberFloorMat = new THREE.MeshStandardMaterial({
+        color: 0x374151,
+        roughness: 0.9,
+        metalness: 0.1
+      });
+
+      const chamberFloor = new THREE.Mesh(new THREE.BoxGeometry(12, 0.06, 16), chamberFloorMat);
+      chamberFloor.position.set(0, 0.01, -37.5);
+      chamberFloor.receiveShadow = true;
+      sceneBGroup.add(chamberFloor);
+
+      const wallHeight = 4.2;
+      const wallThickness = 0.8;
+      const sideWallLength = 15.8;
+
+      const leftWall = new THREE.Mesh(
+        new THREE.BoxGeometry(wallThickness, wallHeight, sideWallLength),
+        greyWallMat
+      );
+      leftWall.position.set(-6, wallHeight / 2, -37.5);
+      leftWall.castShadow = true;
+      leftWall.receiveShadow = true;
+      sceneBGroup.add(leftWall);
+
+      const rightWall = new THREE.Mesh(
+        new THREE.BoxGeometry(wallThickness, wallHeight, sideWallLength),
+        greyWallMat
+      );
+      rightWall.position.set(6, wallHeight / 2, -37.5);
+      rightWall.castShadow = true;
+      rightWall.receiveShadow = true;
+      sceneBGroup.add(rightWall);
+
+      const backWall = new THREE.Mesh(
+        new THREE.BoxGeometry(12.8, wallHeight, wallThickness),
+        greyWallMat
+      );
+      backWall.position.set(0, wallHeight / 2, -45);
+      backWall.castShadow = true;
+      backWall.receiveShadow = true;
+      sceneBGroup.add(backWall);
+
+      const frontLeftWall = new THREE.Mesh(new THREE.BoxGeometry(4.2, wallHeight, 0.7), greyWallMat);
+      frontLeftWall.position.set(-3.9, wallHeight / 2, -30);
+      frontLeftWall.castShadow = true;
+      frontLeftWall.receiveShadow = true;
+      sceneBGroup.add(frontLeftWall);
+
+      const frontRightWall = new THREE.Mesh(new THREE.BoxGeometry(4.2, wallHeight, 0.7), greyWallMat);
+      frontRightWall.position.set(3.9, wallHeight / 2, -30);
+      frontRightWall.castShadow = true;
+      frontRightWall.receiveShadow = true;
+      sceneBGroup.add(frontRightWall);
+
+      const doorMat = new THREE.MeshStandardMaterial({
+        color: 0x4b5563,
+        roughness: 0.9,
+        metalness: 0.2
+      });
+      sceneBDoorLeft = new THREE.Mesh(new THREE.BoxGeometry(1.75, 3.6, 0.45), doorMat);
+      sceneBDoorLeft.position.set(-0.9, 1.8, -30);
+      sceneBDoorLeft.castShadow = true;
+      sceneBGroup.add(sceneBDoorLeft);
+
+      sceneBDoorRight = new THREE.Mesh(new THREE.BoxGeometry(1.75, 3.6, 0.45), doorMat);
+      sceneBDoorRight.position.set(0.9, 1.8, -30);
+      sceneBDoorRight.castShadow = true;
+      sceneBGroup.add(sceneBDoorRight);
+
+      const pillarGeo = new THREE.BoxGeometry(0.9, 4.0, 0.9);
+      const chamberPillarCoords = [
+        { x: -3.2, z: -34 },
+        { x: 3.2, z: -34 },
+        { x: -3.2, z: -40 },
+        { x: 3.2, z: -40 }
+      ];
+      chamberPillarCoords.forEach(coord => {
+        const pillar = new THREE.Mesh(pillarGeo, greyPillarMat);
+        pillar.position.set(coord.x, 2.0, coord.z);
+        pillar.castShadow = true;
+        pillar.receiveShadow = true;
+        sceneBGroup.add(pillar);
+      });
+
+      const plateGeo = new THREE.BoxGeometry(1.6, 0.12, 1.6);
+      const plateMat = new THREE.MeshStandardMaterial({
+        color: 0x9ca3af,
+        roughness: 0.6,
+        metalness: 0.3
+      });
+      sceneBPressurePlateMesh = new THREE.Mesh(plateGeo, plateMat);
+      sceneBPressurePlateMesh.position.set(0, 0.06, -36);
+      sceneBPressurePlateMesh.receiveShadow = true;
+      sceneBGroup.add(sceneBPressurePlateMesh);
+
+      const pedestalGeo = new THREE.BoxGeometry(2.8, 0.6, 2.2);
+      const pedestalMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        roughness: 0.7,
+        metalness: 0.25
+      });
+      const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
+      pedestal.position.set(0, 0.3, -43.2);
+      pedestal.castShadow = true;
+      pedestal.receiveShadow = true;
+      sceneBGroup.add(pedestal);
+
+      const statueGeo = new THREE.BoxGeometry(2.1, 3.5, 1.6);
+      const statueMat = new THREE.MeshStandardMaterial({
+        color: 0x0f1f3d,
+        emissive: 0x071024,
+        emissiveIntensity: 0.15,
+        roughness: 0.35,
+        metalness: 0.45
+      });
+      sceneBStatueMesh = new THREE.Mesh(statueGeo, statueMat);
+      sceneBStatueMesh.position.set(0, 2.35, -43.2);
+      sceneBStatueMesh.castShadow = true;
+      sceneBStatueMesh.receiveShadow = true;
+      sceneBGroup.add(sceneBStatueMesh);
+
+      scene.add(sceneBGroup);
+    }
+
+    function illuminateSceneBChamber() {
+      if (!sceneBPointLight) {
+        sceneBPointLight = new THREE.PointLight(0xffffff, 1.45, 24, 1.35);
+        sceneBPointLight.position.set(0, 3.8, -35);
+        sceneBPointLight.castShadow = true;
+        sceneBPointLight.shadow.bias = -0.002;
+        scene.add(sceneBPointLight);
+      }
+      if (sceneBDoorLeft && sceneBDoorRight) {
+        sceneBDoorLeft.position.x = -2.2;
+        sceneBDoorRight.position.x = 2.2;
+      }
+    }
+
+    /********************************************************************
+     * 【3-1. 修改 buildPlayerToken()】
+     * 不再使用 Cylinder，改為透過 ModelLoader (GLTFLoader) 載入主角模型，
+     * 並調整縮放 (Scale) 符合 1 格 (1 單位) 大小，保留腳下的藍色選取光環。
+     ********************************************************************/
+    function buildPlayerToken() {
+      if (playerMesh) {
+        scene.remove(playerMesh);
+      }
+      const playerGroup = new THREE.Group();
+
+      // 透過 GLTFLoader 載入並正規化後的主角騎士模型
+      playerModelContainer = ModelLoader.getClone('player');
+      playerModelContainer.name = 'playerModelRoot';
+      playerModelContainer.scale.set(0.95, 0.95, 0.95); // 符合 1 格 (1 單位) 大小
+      playerGroup.add(playerModelContainer);
+
+      // 保留腳下的藍色選取光環
+      const ringGeo = new THREE.RingGeometry(0.42, 0.49, 28);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x60a5fa,
+        side: THREE.DoubleSide
+      });
+      playerRingMesh = new THREE.Mesh(ringGeo, ringMat);
+      playerRingMesh.rotation.x = -Math.PI / 2;
+      playerRingMesh.position.y = 0.03;
+      playerGroup.add(playerRingMesh);
+
+      // 近戰攻擊範圍提示框 (1 格 = 周圍 3x3 格，戰鬥模式顯示)
+      rangeRingGroup = new THREE.Group();
+      const rangeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(3.0, 0.05, 3.0));
+      const rangeMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.55 });
+      const rangeWire = new THREE.LineSegments(rangeGeo, rangeMat);
+      rangeWire.position.y = 0.04;
+      rangeRingGroup.add(rangeWire);
+      rangeRingGroup.visible = false;
+      playerGroup.add(rangeRingGroup);
+
+      playerMesh = playerGroup;
+      playerMesh.position.copy(playerTargetWorldPos);
+      scene.add(playerMesh);
+    }
+
+    /********************************************************************
+     * 【3-2. 修改 spawnEnemiesFromScenario()】
+     * 不再使用 Box，改為載入哥布林模型，並確保每個敵人都 clone 自同一個
+     * 載入好的模型 (ModelLoader.getClone('goblin'))，以節省效能。
+     ********************************************************************/
+    function spawnEnemiesFromScenario(customEnemyList = null) {
+      enemyMeshes.forEach(mesh => scene.remove(mesh));
+      enemyMeshes.clear();
+
+      const sourceList = customEnemyList !== null
+        ? customEnemyList
+        : DELIAN_TOMB_SCENARIO.scenes[GameState.currentScene].enemies;
+      GameState.enemies = sourceList.map((e, i) => ({
+        ...e,
+        alive: true,
+        baseFacingAngle: e.baseFacingAngle !== undefined ? e.baseFacingAngle : (i % 2 === 0 ? Math.PI * 0.4 : Math.PI * 0.6),
+        currentFacingAngle: e.baseFacingAngle !== undefined ? e.baseFacingAngle : Math.PI * 0.5,
+        visionRange: e.visionRange || 3.4,
+        visionAngle: e.visionAngle || Math.PI * 0.55
+      }));
+
+      GameState.enemies.forEach(enemy => {
+        const group = new THREE.Group();
+        group.position.set(enemy.gridX, 0, enemy.gridZ);
+        group.userData = { enemyId: enemy.id };
+
+        // 每個敵人皆 clone 自 ModelLoader 預先載入好的同一個哥布林模型
+        const goblinClone = ModelLoader.getClone('goblin', enemy.color);
+        goblinClone.name = 'enemyModelRoot';
+        goblinClone.scale.set(0.92, 0.92, 0.92); // 符合 1 格 (1 單位) 大小
+        goblinClone.traverse(child => {
+          child.userData = { enemyId: enemy.id };
+        });
+        group.add(goblinClone);
+
+        // 敵人腳下選取紅圈
+        const selGeo = new THREE.RingGeometry(0.44, 0.54, 24);
+        const selMat = new THREE.MeshBasicMaterial({
+          color: 0xf43f5e,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.85
+        });
+        const selRing = new THREE.Mesh(selGeo, selMat);
+        selRing.rotation.x = -Math.PI / 2;
+        selRing.position.y = 0.03;
+        selRing.name = 'selectionRing';
+        group.add(selRing);
+
+        // 潛行中狀態專屬：敵人扇形視野範圍錐
+        const visionGroup = new THREE.Group();
+        visionGroup.name = 'visionConeGroup';
+        visionGroup.position.y = 0.035;
+
+        const halfSpread = enemy.visionAngle / 2;
+        const coneGeo = new THREE.CircleGeometry(enemy.visionRange, 28, -halfSpread, enemy.visionAngle);
+        const coneMat = new THREE.MeshBasicMaterial({
+          color: 0xef4444,
+          transparent: true,
+          opacity: 0.24,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        });
+        const coneMesh = new THREE.Mesh(coneGeo, coneMat);
+        coneMesh.rotation.x = -Math.PI / 2;
+        coneMesh.name = 'visionConeFill';
+        visionGroup.add(coneMesh);
+
+        const edgeGeo = new THREE.EdgesGeometry(coneGeo);
+        const edgeMat = new THREE.LineBasicMaterial({
+          color: 0xf87171,
+          transparent: true,
+          opacity: 0.8
+        });
+        const coneEdges = new THREE.LineSegments(edgeGeo, edgeMat);
+        coneEdges.rotation.x = -Math.PI / 2;
+        visionGroup.add(coneEdges);
+
+        const innerRingGeo = new THREE.RingGeometry(1.35, 1.42, 24);
+        const innerRingMat = new THREE.MeshBasicMaterial({
+          color: 0xfbbf24,
+          transparent: true,
+          opacity: 0.35,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        });
+        const innerRing = new THREE.Mesh(innerRingGeo, innerRingMat);
+        innerRing.rotation.x = -Math.PI / 2;
+        visionGroup.add(innerRing);
+
+        visionGroup.visible = (GameState.mode === 'EXPLORATION' && GameState.isStealth);
+        group.add(visionGroup);
+
+        scene.add(group);
+        enemyMeshes.set(enemy.id, group);
+      });
+
+      const firstAlive = GameState.enemies.find(e => e.alive);
+      GameState.selectedEnemyId = firstAlive ? firstAlive.id : null;
+      updateTargetSelectionVisuals();
+      rebuildWorldLabels();
+    }
+
+    function isGridCellInEnemyVision(gx, gz) {
+      if (GameState.mode !== 'EXPLORATION') return null;
+      for (const enemy of GameState.enemies) {
+        if (!enemy.alive) continue;
+        const dx = gx - enemy.gridX;
+        const dz = gz - enemy.gridZ;
+        const dist = Math.hypot(dx, dz);
+        if (dist === 0) return enemy;
+        if (dist <= enemy.visionRange) {
+          const angleToCell = Math.atan2(dz, dx);
+          let diff = angleToCell - enemy.currentFacingAngle;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          if (Math.abs(diff) <= enemy.visionAngle / 2) {
+            return enemy;
+          }
+        }
+      }
+      return null;
+    }
+
+    function toggleStealthMode(forceState = null) {
+      if (GameState.mode === 'COMBAT') {
+        showRuleToast('戰鬥模式已全面開戰，無法進入潛行狀態！');
+        return;
+      }
+      GameState.isStealth = forceState !== null ? forceState : !GameState.isStealth;
+      SoundFX.step();
+
+      enemyMeshes.forEach(group => {
+        const visionGroup = group.getObjectByName('visionConeGroup');
+        if (visionGroup) {
+          visionGroup.visible = GameState.isStealth;
+        }
+      });
+
+      appendDiceLog(
+        GameState.isStealth
+          ? `[潛行狀態開啟] 你壓低身形進入潛行！3D 地面已標示出敵人的紅色扇形【視野範圍 (15呎)】。`
+          : `[潛行狀態關閉] 已隱藏敵方視野範圍輔助顯示。`,
+        GameState.isStealth ? 'text-emerald-400 font-semibold' : 'text-slate-400'
+      );
+      updateAllUI();
+    }
+
+    /********************************************************************
+     * 5. 距離計算、Raycaster 滑鼠座標轉換、視角拖曳旋轉與網格移動邏輯
+     ********************************************************************/
+    function getDistancesToEnemy(enemy) {
+      if (!enemy) return { gridDist: Infinity, worldDist: Infinity };
+      const dx = Math.abs(GameState.player.gridX - enemy.gridX);
+      const dz = Math.abs(GameState.player.gridZ - enemy.gridZ);
+      const gridDist = Math.max(dx, dz);
+      const pVec = new THREE.Vector3(GameState.player.gridX, 0, GameState.player.gridZ);
+      const eVec = new THREE.Vector3(enemy.gridX, 0, enemy.gridZ);
+      const worldDist = pVec.distanceTo(eVec);
+      return { gridDist, worldDist };
+    }
+
+    function isCellOccupiedByEnemy(gx, gz) {
+      return GameState.enemies.some(e => e.alive && e.gridX === gx && e.gridZ === gz);
+    }
+
+    function onPointerDown(event) {
+      CameraOrbit.isDragging = true;
+      CameraOrbit.pointerDownX = event.clientX;
+      CameraOrbit.pointerDownY = event.clientY;
+      CameraOrbit.dragMovedDistance = 0;
+    }
+
+    function onPointerMove(event) {
+      if (CameraOrbit.isDragging) {
+        const dx = event.clientX - CameraOrbit.pointerDownX;
+        const dy = event.clientY - CameraOrbit.pointerDownY;
+        CameraOrbit.dragMovedDistance += Math.hypot(dx, dy);
+        CameraOrbit.pointerDownX = event.clientX;
+        CameraOrbit.pointerDownY = event.clientY;
+
+        if (CameraOrbit.dragMovedDistance > 5) {
+          CameraOrbit.targetYaw -= dx * 0.0085;
+          CameraOrbit.targetPitch = Math.max(0.32, Math.min(1.28, CameraOrbit.targetPitch + dy * 0.0065));
+          updateCameraAngleBadge();
+          return;
+        }
+      }
+
+      if (!renderer) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouseNDC.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseNDC.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouseNDC, camera);
+      const intersects = raycaster.intersectObject(groundPlane);
+
+      if (intersects.length > 0) {
+        const pt = intersects[0].point;
+        const gx = Math.round(pt.x);
+        const gz = Math.round(pt.z);
+
+        if (gx >= -10 && gx <= 10 && gz >= -44 && gz <= 10) {
+          hoveredGridCell = { x: gx, z: gz, valid: true };
+          hoverTileMesh.position.set(gx, 0.025, gz);
+          hoverTileMesh.visible = true;
+
+          const moveCost = Math.max(
+            Math.abs(gx - GameState.player.gridX),
+            Math.abs(gz - GameState.player.gridZ)
+          );
+          const watcher = GameState.isStealth ? isGridCellInEnemyVision(gx, gz) : null;
+
+          if (isCellOccupiedByEnemy(gx, gz)) {
+            hoverTileMesh.material.color.setHex(0xf43f5e);
+          } else if (!GameState.doorOpened && gz < -29) {
+            hoverTileMesh.material.color.setHex(0x64748b);
+          } else if (GameState.mode === 'COMBAT' && moveCost > GameState.player.movement) {
+            hoverTileMesh.material.color.setHex(0xf97316);
+          } else if (watcher) {
+            hoverTileMesh.material.color.setHex(0xef4444);
+          } else if (GameState.isStealth && GameState.mode === 'EXPLORATION') {
+            hoverTileMesh.material.color.setHex(0x10b981);
+          } else {
+            hoverTileMesh.material.color.setHex(0x38bdf8);
+          }
+          return;
+        }
+      }
+      hoveredGridCell.valid = false;
+      hoverTileMesh.visible = false;
+    }
+
+    function onPointerUp(event) {
+      const wasClick = CameraOrbit.isDragging && CameraOrbit.dragMovedDistance <= 6 && event.button === 0;
+      CameraOrbit.isDragging = false;
+
+      if (!wasClick) return;
+      if (GameState.isEnemyTurn || GameState.player.hp <= 0) return;
+      if (event.target !== renderer.domElement) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouseNDC.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseNDC.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouseNDC, camera);
+
+      const aliveEnemyGroups = [];
+      GameState.enemies.forEach(e => {
+        if (e.alive && enemyMeshes.has(e.id)) {
+          aliveEnemyGroups.push(enemyMeshes.get(e.id));
+        }
+      });
+
+      const enemyHits = raycaster.intersectObjects(aliveEnemyGroups, true);
+      if (enemyHits.length > 0) {
+        let obj = enemyHits[0].object;
+        while (obj && (!obj.userData || !obj.userData.enemyId)) {
+          obj = obj.parent;
+        }
+        if (obj && obj.userData && obj.userData.enemyId) {
+          selectEnemyTarget(obj.userData.enemyId);
+          return;
+        }
+      }
+
+      const groundHits = raycaster.intersectObject(groundPlane);
+      if (groundHits.length > 0) {
+        const pt = groundHits[0].point;
+        const targetX = Math.round(pt.x);
+        const targetZ = Math.round(pt.z);
+        handlePlayerGridMove(targetX, targetZ);
+      }
+    }
+
+    function onMouseWheel(event) {
+      event.preventDefault();
+      CameraOrbit.targetDistance = Math.max(9.5, Math.min(28, CameraOrbit.targetDistance + event.deltaY * 0.012));
+    }
+
+    function onKeyDown(event) {
+      if (event.target && event.target.tagName === 'INPUT') return;
+      const key = event.key.toLowerCase();
+      if (key === 'q' || event.key === 'ArrowLeft') {
+        rotateCameraBy(-Math.PI / 8);
+      } else if (key === 'e' || event.key === 'ArrowRight') {
+        rotateCameraBy(Math.PI / 8);
+      } else if (key === 'r') {
+        resetCameraOrbit();
+      }
+    }
+
+    function handlePlayerGridMove(targetX, targetZ) {
+      if (targetX < -10 || targetX > 10 || targetZ < -44 || targetZ > 10) return;
+
+      if (!GameState.doorOpened && targetZ < -29) {
+        SoundFX.error();
+        showRuleToast('前方 Z = -30 的古老石門緊閉！請先點擊下方『推開石門進入獻祭室』按鈕。');
+        return;
+      }
+
+      if (targetZ <= -30 && (targetX < -5 || targetX > 5)) {
+        SoundFX.error();
+        showRuleToast('該處為獻祭室厚重的灰岩牆壁！');
+        return;
+      }
+
+      const enemyOnTile = GameState.enemies.find(e => e.alive && e.gridX === targetX && e.gridZ === targetZ);
+      if (enemyOnTile) {
+        selectEnemyTarget(enemyOnTile.id);
+        showRuleToast(`已鎖定【${enemyOnTile.name}】！請移動至其相鄰 1 格內發動攻擊或暗殺。`);
+        return;
+      }
+
+      const stepDist = Math.max(
+        Math.abs(targetX - GameState.player.gridX),
+        Math.abs(targetZ - GameState.player.gridZ)
+      );
+      if (stepDist === 0) return;
+
+      if (GameState.mode === 'COMBAT') {
+        if (GameState.player.movement <= 0) {
+          SoundFX.error();
+          showRuleToast('本回合移動力 (6格) 已耗盡！請進行攻擊或點擊「結束回合」。');
+          return;
+        }
+        if (stepDist > GameState.player.movement) {
+          SoundFX.error();
+          showRuleToast(`目標距離 ${stepDist} 格，超過本回合剩餘移動力 (${GameState.player.movement} 格)！`);
+          return;
+        }
+        GameState.player.movement -= stepDist;
+        appendDiceLog(
+          `[戰術移動] 移動 ${stepDist} 格 (${stepDist * 5}呎) → 座標 (${targetX}, ${targetZ})，剩餘移動力 ${GameState.player.movement} 格`,
+          'text-sky-300'
+        );
+      }
+
+      const moveDx = targetX - GameState.player.gridX;
+      const moveDz = targetZ - GameState.player.gridZ;
+      if (playerModelContainer && (moveDx !== 0 || moveDz !== 0)) {
+        playerModelContainer.rotation.y = Math.atan2(moveDx, moveDz);
+      }
+
+      GameState.player.gridX = targetX;
+      GameState.player.gridZ = targetZ;
+      playerTargetWorldPos.set(targetX, 0, targetZ);
+      SoundFX.step();
+
+      const spottingEnemy = isGridCellInEnemyVision(targetX, targetZ);
+      if (spottingEnemy && GameState.mode === 'EXPLORATION') {
+        const d20 = rollDie(20);
+        const total = d20 + GameState.player.dexMod;
+        const dc = 12;
+        document.getElementById('ui-last-dice-badge').textContent = `視野檢定 D20(${d20})+2=${total}`;
+        if (total < dc) {
+          SoundFX.error();
+          appendDiceLog(
+            `[視野偵測警報] 你踏入了【${spottingEnemy.name}】的視野範圍！敏捷檢定 D20(${d20})+2 = ${total} vs 被動感知(12)... 被發現了！`,
+            'text-rose-400 font-bold'
+          );
+          showRuleToast(`⚠️ 你踏入【${spottingEnemy.name}】的視野範圍並被發現，進入戰鬥！`);
+          enterCombatMode(`你踏入了【${spottingEnemy.name}】的正面視野範圍！哥布林發出刺耳的警報聲並拔出彎刀，進入戰鬥模式！`);
+          return;
+        } else {
+          appendDiceLog(
+            `[視野閃避成功] 你掠過【${spottingEnemy.name}】的視野邊緣！敏捷檢定 D20(${d20})+2 = ${total} vs DC(12)... 驚險未被察覺！`,
+            'text-emerald-400'
+          );
+        }
+      }
+
+      if (
+        GameState.currentScene === 'scene_b' &&
+        GameState.doorOpened &&
+        !GameState.trapTriggered &&
+        targetZ <= -35 &&
+        Math.abs(targetX) <= 1
+      ) {
+        triggerPressurePlateTrap();
+        return;
+      }
+
+      updateAllUI();
+    }
+
+    /********************************************************************
+     * 6. DND 5e 自動擲骰機制與場景 A / 場景 B 劇情推進邏輯
+     ********************************************************************/
+    function rollDie(sides) {
+      return Math.floor(Math.random() * sides) + 1;
+    }
+
+    function executeStealthAssassination() {
+      if (GameState.stealthAttempted) return;
+      GameState.stealthAttempted = true;
+      SoundFX.dice();
+
+      const inVision = isGridCellInEnemyVision(GameState.player.gridX, GameState.player.gridZ);
+      const roll1 = rollDie(20);
+      const roll2 = rollDie(20);
+      const hasAdvantage = GameState.isStealth && !inVision;
+      const d20 = hasAdvantage ? Math.max(roll1, roll2) : roll1;
+      const dexMod = GameState.player.dexMod;
+      const total = d20 + dexMod;
+      const dc = 12;
+
+      document.getElementById('ui-last-dice-badge').textContent = `D20(${d20}) + ${dexMod} = ${total}`;
+
+      if (total >= dc) {
+        const targetGoblin =
+          GameState.enemies.find(e => e.alive && e.id === GameState.selectedEnemyId) ||
+          GameState.enemies.find(e => e.alive);
+
+        if (targetGoblin) {
+          targetGoblin.alive = false;
+          targetGoblin.hp = 0;
+
+          GameState.player.gridX = targetGoblin.gridX;
+          GameState.player.gridZ = targetGoblin.gridZ + 1;
+          playerTargetWorldPos.set(GameState.player.gridX, 0, GameState.player.gridZ);
+
+          const mesh = enemyMeshes.get(targetGoblin.id);
+          if (mesh) {
+            spawnFloatingText(targetGoblin.gridX, targetGoblin.gridZ, '💀 潛行暗殺秒殺！', 'text-emerald-400 font-extrabold text-sm');
+            scene.remove(mesh);
+            enemyMeshes.delete(targetGoblin.id);
+          }
+        }
+
+        SoundFX.stealthKill();
+        const advText = hasAdvantage ? `(死角優勢 max(${roll1},${roll2})=${d20})` : `(${d20})`;
+        appendDiceLog(
+          `[敏捷檢定] D20${advText} + 敏捷(${dexMod}) = ${total} vs DC(${dc})... 潛行成功！直接抹殺了【${targetGoblin.name}】！`,
+          'text-emerald-400 font-bold'
+        );
+
+        const remaining = GameState.enemies.find(e => e.alive);
+        GameState.selectedEnemyId = remaining ? remaining.id : null;
+        document.getElementById('badge-stealth-buff').classList.remove('hidden');
+        document.getElementById('badge-stealth-buff').classList.add('inline-flex');
+
+        enterCombatMode(
+          `你如同夜影般避開視野死角，在【${targetGoblin.name}】發出聲音前便將其一劍封喉！營火旁僅存的【${remaining ? remaining.name : '哥布林'}】驚恐地舉起彎刀，進入戰鬥模式！`
+        );
+      } else {
+        SoundFX.miss();
+        appendDiceLog(
+          `[敏捷檢定] D20(${d20}) + 敏捷(${dexMod}) = ${total} vs DC(${dc})... 檢定失敗！你踩碎了枯枝驚動了哥布林！`,
+          'text-rose-400 font-bold'
+        );
+        enterCombatMode(
+          `糟糕！你的靴子踢落了一塊碎石，兩隻哥布林立刻警覺地跳了起來，拔出鏽蝕的彎刀朝你咆哮！進入戰鬥模式！`
+        );
+      }
+    }
+
+    function transitionToSceneB() {
+      GameState.mode = 'EXPLORATION';
+      GameState.currentScene = 'scene_b';
+      GameState.currentNode = 'stairs_stone_door';
+      if (rangeRingGroup) rangeRingGroup.visible = false;
+
+      GameState.player.gridX = 0;
+      GameState.player.gridZ = -25;
+      playerTargetWorldPos.set(0, 0, -25);
+
+      SoundFX.step();
+      appendDiceLog(
+        `[場景推進] 舉起火把走下古墓石階 → 切換至【場景 B】，主角與攝影機平滑移動至入口座標 (0, -25)。`,
+        'text-amber-300 font-bold'
+      );
+
+      setSceneNarrativeFromCurrentNode();
+      updateAllUI();
+    }
+
+    function pushOpenStoneDoor() {
+      GameState.doorOpened = true;
+      GameState.currentNode = 'push_door_chamber';
+
+      illuminateSceneBChamber();
+
+      GameState.player.gridX = 0;
+      GameState.player.gridZ = -31;
+      playerTargetWorldPos.set(0, 0, -31);
+
+      SoundFX.stoneDoor();
+      appendDiceLog(
+        `[環境互動] 你推開了沉重的石門！已在 Z = -35 處動態點亮微弱的白色 PointLight，照亮整座地下獻祭室！`,
+        'text-sky-300 font-bold'
+      );
+
+      setSceneNarrativeFromCurrentNode();
+      updateAllUI();
+    }
+
+    function triggerPressurePlateTrap() {
+      GameState.trapTriggered = true;
+      GameState.currentNode = 'pressure_plate_trap';
+
+      GameState.player.gridX = 0;
+      GameState.player.gridZ = -36;
+      playerTargetWorldPos.set(0, 0, -36);
+
+      if (sceneBPressurePlateMesh) {
+        sceneBPressurePlateMesh.position.y = 0.02;
+        sceneBPressurePlateMesh.material.color.setHex(0xe11d48);
+      }
+
+      const trapRoll = rollDie(4);
+      const trapDmg = trapRoll + 1;
+      const oldHp = GameState.player.hp;
+      GameState.player.hp = Math.max(1, GameState.player.hp - trapDmg);
+      const actualLost = oldHp - GameState.player.hp;
+
+      SoundFX.trap();
+      document.getElementById('ui-last-dice-badge').textContent = `陷阱 1d4(${trapRoll})+1 = -${trapDmg} HP`;
+      appendDiceLog(
+        `[觸發壓力板陷阱] 你踩中了 Z = -36 的機關石板！飛箭傷害 1d4(${trapRoll}) + 1 = ${trapDmg} 點穿刺傷害 (HP: ${oldHp} → ${GameState.player.hp})！`,
+        'text-rose-400 font-bold'
+      );
+      spawnFloatingText(0, -36, `-${actualLost || trapDmg} HP (壓力板陷阱!)`, 'text-rose-500 font-extrabold text-base');
+
+      setSceneNarrativeFromCurrentNode();
+      updateAllUI();
+    }
+
+    function goToStatueOathPuzzle() {
+      GameState.currentNode = 'statue_oath_puzzle';
+      GameState.player.gridX = 0;
+      GameState.player.gridZ = -41;
+      playerTargetWorldPos.set(0, 0, -41);
+
+      SoundFX.step();
+      appendDiceLog(
+        `[探索推進] 你來到 Z = -41 的藍黑色迪利安騎士雕像前，準備進行雕像誓言解謎。`,
+        'text-amber-300'
+      );
+
+      setSceneNarrativeFromCurrentNode();
+      updateAllUI();
+    }
+
+    function resolveStatueOath(choiceType) {
+      if (choiceType === 'OATH_SOLVE_SUCCESS') {
+        GameState.oathSolved = true;
+        GameState.currentNode = 'oath_solved_victory';
+
+        if (sceneBStatueMesh && sceneBStatueMesh.material) {
+          sceneBStatueMesh.material.color.setHex(0x1d4ed8);
+          sceneBStatueMesh.material.emissive.setHex(0x38bdf8);
+          sceneBStatueMesh.material.emissiveIntensity = 0.65;
+        }
+        if (sceneBPointLight) {
+          sceneBPointLight.intensity = 2.4;
+          sceneBPointLight.color.setHex(0xe0f2fe);
+        }
+
+        SoundFX.victory();
+        document.getElementById('ui-last-dice-badge').textContent = `誓言解謎：成功！`;
+        appendDiceLog(
+          `[雕像誓言解謎] 你宣讀出正確的迪利安騎士團誓言！藍黑色雕像共鳴發光，獻祭室秘寶封印解除！`,
+          'text-emerald-400 font-bold'
+        );
+        spawnFloatingText(0, -43, `✨ 誓言共鳴！秘寶開啟！`, 'text-amber-300 font-extrabold text-base');
+
+        setSceneNarrativeFromCurrentNode();
+        updateAllUI();
+      } else if (choiceType === 'OATH_SOLVE_FAIL_TRAP') {
+        const shockDmg = rollDie(4);
+        const oldHp = GameState.player.hp;
+        GameState.player.hp = Math.max(1, GameState.player.hp - shockDmg);
+        SoundFX.trap();
+        document.getElementById('ui-last-dice-badge').textContent = `偽誓懲戒 -${shockDmg} HP`;
+        appendDiceLog(
+          `[誓言錯誤] 貪婪之語觸怒了騎士英靈！雕像迸發藍色電光造成 1d4(${shockDmg}) 點傷害 (HP: ${oldHp} → ${GameState.player.hp})！請重新選擇正確的騎士誓言。`,
+          'text-rose-400 font-bold'
+        );
+        spawnFloatingText(0, -41, `⚡ 偽誓懲戒 -${shockDmg} HP`, 'text-rose-400 font-extrabold text-sm');
+        showRuleToast('錯誤的誓言！想想騎士團守護無辜的信條，再次選擇。');
+        updateAllUI();
+      } else if (choiceType === 'OATH_SOLVE_FAIL_GUARDIAN') {
+        SoundFX.trap();
+        appendDiceLog(
+          `[誓言錯誤] 混沌誓言驚動了墓室亡魂！一尊【古墓骸骨守衛】從石柱陰影中現身，進入戰鬥模式！`,
+          'text-rose-400 font-bold'
+        );
+        spawnEnemiesFromScenario([
+          {
+            id: 'tomb_guardian_1',
+            name: '古墓骸骨守衛',
+            gridX: 0,
+            gridZ: -39,
+            hp: 9,
+            maxHp: 9,
+            ac: 12,
+            atkBonus: 4,
+            dmgDice: 6,
+            dmgMod: 2,
+            color: 0x38bdf8,
+            baseFacingAngle: Math.PI * 0.5,
+            visionRange: 3.2,
+            visionAngle: Math.PI * 0.55
+          }
+        ]);
+        enterCombatMode('混沌之語喚醒了石室中的【古墓骸骨守衛】！擊敗牠以繼續解開雕像之謎！');
+      }
+    }
+
+    function enterCombatMode(customNarrative = null) {
+      GameState.mode = 'COMBAT';
+      GameState.turn = 1;
+      GameState.isEnemyTurn = false;
+      GameState.player.actions = GameState.player.maxActions;
+      GameState.player.movement = GameState.player.maxMovement;
+
+      if (rangeRingGroup) rangeRingGroup.visible = true;
+      enemyMeshes.forEach(group => {
+        const visionGroup = group.getObjectByName('visionConeGroup');
+        if (visionGroup) visionGroup.visible = false;
+      });
+
+      const sceneObj = DELIAN_TOMB_SCENARIO.scenes[GameState.currentScene];
+      const narrativeEl = document.getElementById('ui-dm-narrative');
+      narrativeEl.textContent = customNarrative || sceneObj.nodes.combat_active.text;
+
+      appendDiceLog(`=== ⚔️ 進入【戰鬥模式】第 1 回合（玩家先攻） ===`, 'text-amber-400 font-bold');
+      updateAllUI();
+    }
+
+    function executePlayerMeleeAttack() {
+      if (GameState.mode !== 'COMBAT' || GameState.isEnemyTurn) return;
+
+      if (GameState.player.actions <= 0) {
+        SoundFX.error();
+        showRuleToast('本回合的 [動作] 已使用完畢！請點擊「結束回合」。');
+        return;
+      }
+
+      let target = GameState.enemies.find(e => e.alive && e.id === GameState.selectedEnemyId);
+      if (!target) {
+        target = GameState.enemies.find(e => e.alive);
+        if (target) GameState.selectedEnemyId = target.id;
+      }
+      if (!target) return;
+
+      const { gridDist, worldDist } = getDistancesToEnemy(target);
+      if (gridDist > 1 || worldDist > 1.55) {
+        SoundFX.error();
+        showRuleToast(
+          `與【${target.name}】相距 ${gridDist} 格 (3D 距離 ${worldDist.toFixed(1)} 單位)，超過 1 格 (5呎) 近戰範圍，禁止攻擊！請先點擊網格移動靠近。`
+        );
+        appendDiceLog(
+          `[距離判定] 目標【${target.name}】距離 ${gridDist} 格 (> 1格)，近戰攻擊被系統攔截。`,
+          'text-rose-400'
+        );
+        return;
+      }
+
+      if (playerModelContainer) {
+        playerModelContainer.rotation.y = Math.atan2(
+          target.gridX - GameState.player.gridX,
+          target.gridZ - GameState.player.gridZ
+        );
+      }
+
+      GameState.player.actions -= 1;
+      SoundFX.dice();
+
+      const d20 = rollDie(20);
+      const weaponBonus = GameState.holySwordEquipped ? 1 : 0;
+      const strMod = GameState.player.strMod + weaponBonus;
+      const attackRoll = d20 + strMod;
+      const isCrit = d20 === 20;
+      const isHit = isCrit || (d20 !== 1 && attackRoll >= target.ac);
+
+      document.getElementById('ui-last-dice-badge').textContent = `D20(${d20}) + ${strMod} = ${attackRoll}`;
+
+      if (isHit) {
+        const dmgDie1 = rollDie(8);
+        const dmgDie2 = isCrit ? rollDie(8) : 0;
+        const totalDmg = dmgDie1 + dmgDie2 + strMod;
+        target.hp = Math.max(0, target.hp - totalDmg);
+
+        SoundFX.hit();
+        const critTag = isCrit ? ' (大成功暴擊！)' : '';
+        appendDiceLog(
+          `[攻擊檢定] D20(${d20}) + 力量(${strMod}) = ${attackRoll} vs ${target.name} AC(${target.ac})... 命中！${critTag}`,
+          'text-emerald-400 font-bold'
+        );
+        appendDiceLog(
+          `[傷害擲骰] 長劍 1d8(${dmgDie1}${isCrit ? '+' + dmgDie2 : ''}) + 力量(${strMod}) = ${totalDmg} 點揮砍傷害！(${target.name} HP: ${target.hp}/${target.maxHp})`,
+          'text-amber-300'
+        );
+
+        spawnFloatingText(target.gridX, target.gridZ, `-${totalDmg} HP`, 'text-rose-400 font-extrabold text-base');
+        flashEnemyMesh(target.id);
+
+        if (target.hp <= 0) {
+          target.alive = false;
+          const mesh = enemyMeshes.get(target.id);
+          if (mesh) {
+            scene.remove(mesh);
+            enemyMeshes.delete(target.id);
+          }
+          appendDiceLog(`💀 【${target.name}】被你的長劍擊倒並從戰場移除！`, 'text-emerald-300 font-bold');
+
+          const nextAlive = GameState.enemies.find(e => e.alive);
+          GameState.selectedEnemyId = nextAlive ? nextAlive.id : null;
+        }
+      } else {
+        SoundFX.miss();
+        appendDiceLog(
+          `[攻擊檢定] D20(${d20}) + 力量(${strMod}) = ${attackRoll} vs ${target.name} AC(${target.ac})... 未命中！(被格擋)`,
+          'text-slate-400'
+        );
+        spawnFloatingText(target.gridX, target.gridZ, `MISS`, 'text-slate-300 font-bold text-sm');
+      }
+
+      checkCombatVictory();
+      updateAllUI();
+    }
+
+    function endPlayerTurn() {
+      if (GameState.mode !== 'COMBAT' || GameState.isEnemyTurn) return;
+
+      const aliveEnemies = GameState.enemies.filter(e => e.alive);
+      if (aliveEnemies.length === 0) {
+        checkCombatVictory();
+        return;
+      }
+
+      GameState.isEnemyTurn = true;
+      updateAllUI();
+      appendDiceLog(`--- 👹 敵方回合開始 ---`, 'text-rose-400 font-semibold');
+
+      aliveEnemies.forEach((goblin, idx) => {
+        setTimeout(() => {
+          if (GameState.mode !== 'COMBAT' || !goblin.alive || GameState.player.hp <= 0) return;
+
+          let { gridDist } = getDistancesToEnemy(goblin);
+          if (gridDist > 1) {
+            let steps = Math.min(6, gridDist - 1);
+            while (steps > 0) {
+              const dx = Math.sign(GameState.player.gridX - goblin.gridX);
+              const dz = Math.sign(GameState.player.gridZ - goblin.gridZ);
+              const nextX = goblin.gridX + dx;
+              const nextZ = goblin.gridZ + dz;
+              const blockedByPlayer = (nextX === GameState.player.gridX && nextZ === GameState.player.gridZ);
+              const blockedByOther = GameState.enemies.some(
+                other => other.alive && other.id !== goblin.id && other.gridX === nextX && other.gridZ === nextZ
+              );
+              if (!blockedByPlayer && !blockedByOther) {
+                goblin.gridX = nextX;
+                goblin.gridZ = nextZ;
+              } else if (!blockedByPlayer && dx !== 0 && !isCellOccupiedByEnemy(goblin.gridX + dx, goblin.gridZ)) {
+                goblin.gridX += dx;
+              } else if (!blockedByPlayer && dz !== 0 && !isCellOccupiedByEnemy(goblin.gridX, goblin.gridZ + dz)) {
+                goblin.gridZ += dz;
+              } else {
+                break;
+              }
+              steps--;
+            }
+            const mesh = enemyMeshes.get(goblin.id);
+            if (mesh) {
+              mesh.position.set(goblin.gridX, 0, goblin.gridZ);
+            }
+          }
+
+          const afterDist = getDistancesToEnemy(goblin).gridDist;
+          if (afterDist <= 1) {
+            const d20 = rollDie(20);
+            const atkTotal = d20 + goblin.atkBonus;
+            if (d20 === 20 || (d20 !== 1 && atkTotal >= GameState.player.ac)) {
+              const dmg = rollDie(goblin.dmgDice) + goblin.dmgMod;
+              GameState.player.hp = Math.max(0, GameState.player.hp - dmg);
+              SoundFX.hit();
+              appendDiceLog(
+                `[敵方攻擊] ${goblin.name} D20(${d20}) + ${goblin.atkBonus} = ${atkTotal} vs 玩家 AC(${GameState.player.ac})... 命中！造成 ${dmg} 點傷害！`,
+                'text-rose-400 font-bold'
+              );
+              spawnFloatingText(GameState.player.gridX, GameState.player.gridZ, `-${dmg} HP`, 'text-rose-500 font-extrabold text-base');
+            } else {
+              SoundFX.miss();
+              appendDiceLog(
+                `[敵方攻擊] ${goblin.name} D20(${d20}) + ${goblin.atkBonus} = ${atkTotal} vs 玩家 AC(${GameState.player.ac})... 被你的盾牌彈開！`,
+                'text-slate-400'
+              );
+              spawnFloatingText(GameState.player.gridX, GameState.player.gridZ, `格擋!`, 'text-sky-300 font-bold text-xs');
+            }
+          } else {
+            appendDiceLog(`[敵方行動] ${goblin.name} 推進至 (${goblin.gridX}, ${goblin.gridZ})。`, 'text-slate-300');
+          }
+
+          if (GameState.player.hp <= 0) {
+            GameState.mode = 'EXPLORATION';
+            GameState.currentNode = 'player_defeated';
+            GameState.isEnemyTurn = false;
+            if (rangeRingGroup) rangeRingGroup.visible = false;
+            setSceneNarrativeFromCurrentNode();
+            updateAllUI();
+            return;
+          }
+
+          if (idx === aliveEnemies.length - 1) {
+            setTimeout(() => {
+              if (GameState.mode !== 'COMBAT') return;
+              GameState.turn += 1;
+              GameState.isEnemyTurn = false;
+              GameState.player.actions = GameState.player.maxActions;
+              GameState.player.movement = GameState.player.maxMovement;
+              appendDiceLog(`=== ⚔️ 第 ${GameState.turn} 回合（玩家行動，移動力重置為 6 格） ===`, 'text-amber-400 font-bold');
+              updateAllUI();
+            }, 350);
+          } else {
+            updateAllUI();
+          }
+        }, (idx + 1) * 550);
+      });
+    }
+
+    function checkCombatVictory() {
+      const aliveCount = GameState.enemies.filter(e => e.alive).length;
+      if (aliveCount === 0) {
+        GameState.mode = 'EXPLORATION';
+        GameState.isEnemyTurn = false;
+        if (rangeRingGroup) rangeRingGroup.visible = false;
+
+        SoundFX.victory();
+        if (GameState.currentScene === 'scene_b') {
+          GameState.currentNode = 'statue_oath_puzzle';
+          appendDiceLog(`🏆 【戰鬥勝利】你擊碎了古墓骸骨守衛！現在可以繼續進行雕像誓言解謎。`, 'text-amber-300 font-bold');
+        } else {
+          GameState.currentNode = 'victory_cleared';
+          appendDiceLog(`🏆 【戰鬥勝利】你肅清了古墓入口的哥布林！自動切換回【探索模式】。`, 'text-amber-300 font-bold');
+        }
+        setSceneNarrativeFromCurrentNode();
+        updateAllUI();
+      }
+    }
+
+    function useHealingPotion() {
+      if (GameState.player.potions <= 0) {
+        showRuleToast('治療藥水已用盡！');
+        return;
+      }
+      if (GameState.player.hp <= 0) return;
+
+      GameState.player.potions -= 1;
+      const d1 = rollDie(4);
+      const d2 = rollDie(4);
+      const heal = d1 + d2 + 2;
+      const oldHp = GameState.player.hp;
+      GameState.player.hp = Math.min(GameState.player.maxHp, GameState.player.hp + heal);
+
+      SoundFX.dice();
+      appendDiceLog(
+        `[道具使用] 飲用治療藥水 2d4(${d1}+${d2}) + 2 = 恢復 ${heal} 點生命值 (HP: ${oldHp} → ${GameState.player.hp})`,
+        'text-emerald-300 font-semibold'
+      );
+      spawnFloatingText(GameState.player.gridX, GameState.player.gridZ, `+${heal} HP`, 'text-emerald-400 font-extrabold text-sm');
+      updateAllUI();
+    }
+
+    /********************************************************************
+     * 7. UI 介面渲染與 3D 頭頂浮動標籤同步
+     ********************************************************************/
+    function setSceneNarrativeFromCurrentNode() {
+      const sceneObj = DELIAN_TOMB_SCENARIO.scenes[GameState.currentScene];
+      if (!sceneObj) return;
+      document.getElementById('ui-scene-title').textContent = sceneObj.title;
+      const nodeObj = sceneObj.nodes[GameState.currentNode];
+      if (nodeObj && nodeObj.text) {
+        document.getElementById('ui-dm-narrative').textContent = nodeObj.text;
+      }
+    }
+
+    function selectEnemyTarget(enemyId) {
+      const target = GameState.enemies.find(e => e.alive && e.id === enemyId);
+      if (!target) return;
+      GameState.selectedEnemyId = enemyId;
+      SoundFX.step();
+      updateTargetSelectionVisuals();
+      updateAllUI();
+    }
+
+    function updateTargetSelectionVisuals() {
+      GameState.enemies.forEach(e => {
+        const group = enemyMeshes.get(e.id);
+        if (!group) return;
+        const ring = group.getObjectByName('selectionRing');
+        if (ring) {
+          ring.visible = (e.id === GameState.selectedEnemyId);
+        }
+      });
+    }
+
+    function flashEnemyMesh(enemyId) {
+      const group = enemyMeshes.get(enemyId);
+      if (!group) return;
+      const modelRoot = group.getObjectByName('enemyModelRoot');
+      if (!modelRoot) return;
+
+      const savedColors = [];
+      modelRoot.traverse(child => {
+        if (child.isMesh && child.material && child.material.color) {
+          savedColors.push({ mat: child.material, hex: child.material.color.getHex() });
+          child.material.color.setHex(0xffffff);
+        }
+      });
+
+      setTimeout(() => {
+        savedColors.forEach(item => {
+          if (item.mat && item.mat.color) item.mat.color.setHex(item.hex);
+        });
+      }, 140);
+    }
+
+    function rebuildWorldLabels() {
+      const layer = document.getElementById('world-labels-layer');
+      layer.innerHTML = '';
+
+      const pTag = document.createElement('div');
+      pTag.id = 'label-player';
+      pTag.className = 'token-label bg-slate-900/85 border border-blue-400/60 text-blue-200 px-2 py-0.5 rounded text-[10px] font-bold shadow whitespace-nowrap';
+      pTag.textContent = '🛡️ 艾登 (你)';
+      layer.appendChild(pTag);
+
+      const statueTag = document.createElement('div');
+      statueTag.id = 'label-statue-b';
+      statueTag.className = 'token-label bg-slate-950/90 border border-indigo-400/60 text-indigo-200 px-2 py-0.5 rounded text-[10px] font-bold shadow whitespace-nowrap';
+      statueTag.textContent = '🗿 迪利安騎士雕像 (Z=-43)';
+      layer.appendChild(statueTag);
+
+      GameState.enemies.forEach(e => {
+        if (!e.alive) return;
+        const eTag = document.createElement('div');
+        eTag.id = `label-${e.id}`;
+        eTag.className = 'token-label flex flex-col items-center';
+        eTag.innerHTML = `
+          <div class="bg-slate-950/90 border border-emerald-500/60 px-2 py-0.5 rounded text-[10px] font-bold text-emerald-300 shadow flex items-center gap-1 whitespace-nowrap">
+            <span>👺 ${e.name}</span>
+            <span class="text-slate-400 font-mono">AC:${e.ac}</span>
+          </div>
+          <div id="label-vision-${e.id}" class="text-[9px] text-rose-300 bg-rose-950/85 border border-rose-500/40 px-1.5 rounded mt-0.5 whitespace-nowrap">
+            👁️ 視野範圍: 3格 (扇形)
+          </div>
+          <div class="w-16 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-700 mt-0.5">
+            <div id="label-hp-${e.id}" class="h-full bg-rose-500 transition-all duration-200" style="width: ${(e.hp / e.maxHp) * 100}%"></div>
+          </div>
+        `;
+        layer.appendChild(eTag);
+      });
+    }
+
+    function updateWorldLabelsPosition() {
+      if (!camera) return;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      const pLabel = document.getElementById('label-player');
+      if (pLabel && playerMesh) {
+        pLabel.textContent = GameState.mode === 'EXPLORATION' && GameState.isStealth
+          ? '🕵️ 艾登 (潛行中)'
+          : '🛡️ 艾登 (你)';
+        const pos = playerMesh.position.clone().add(new THREE.Vector3(0, 1.32, 0));
+        pos.project(camera);
+        if (pos.z < 1) {
+          pLabel.style.left = `${(pos.x * 0.5 + 0.5) * width}px`;
+          pLabel.style.top = `${(-(pos.y * 0.5) + 0.5) * height}px`;
+          pLabel.style.opacity = '1';
+        } else {
+          pLabel.style.opacity = '0';
+        }
+      }
+
+      const sLabel = document.getElementById('label-statue-b');
+      if (sLabel && sceneBStatueMesh) {
+        if (!GameState.doorOpened) {
+          sLabel.style.opacity = '0';
+        } else {
+          const pos = new THREE.Vector3(0, 4.3, -43.2);
+          pos.project(camera);
+          if (pos.z < 1) {
+            sLabel.style.left = `${(pos.x * 0.5 + 0.5) * width}px`;
+            sLabel.style.top = `${(-(pos.y * 0.5) + 0.5) * height}px`;
+            sLabel.style.opacity = '1';
+          } else {
+            sLabel.style.opacity = '0';
+          }
+        }
+      }
+
+      GameState.enemies.forEach(e => {
+        const eLabel = document.getElementById(`label-${e.id}`);
+        if (!e.alive) {
+          if (eLabel) eLabel.remove();
+          return;
+        }
+        const mesh = enemyMeshes.get(e.id);
+        if (eLabel && mesh) {
+          const pos = mesh.position.clone().add(new THREE.Vector3(0, 1.15, 0));
+          pos.project(camera);
+          if (pos.z < 1) {
+            eLabel.style.left = `${(pos.x * 0.5 + 0.5) * width}px`;
+            eLabel.style.top = `${(-(pos.y * 0.5) + 0.5) * height}px`;
+            eLabel.style.opacity = '1';
+          } else {
+            eLabel.style.opacity = '0';
+          }
+          const hpBar = document.getElementById(`label-hp-${e.id}`);
+          if (hpBar) {
+            hpBar.style.width = `${Math.max(0, (e.hp / e.maxHp) * 100)}%`;
+          }
+          const vBadge = document.getElementById(`label-vision-${e.id}`);
+          if (vBadge) {
+            vBadge.style.display = (GameState.mode === 'EXPLORATION' && GameState.isStealth) ? 'block' : 'none';
+          }
+        }
+      });
+    }
+
+    function spawnFloatingText(gridX, gridZ, text, colorClass) {
+      if (!camera) return;
+      const pos = new THREE.Vector3(gridX, 1.1, gridZ);
+      pos.project(camera);
+      const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-(pos.y * 0.5) + 0.5) * window.innerHeight;
+
+      const el = document.createElement('div');
+      el.className = `floating-dmg ${colorClass}`;
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+      el.textContent = text;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1150);
+    }
+
+    let toastTimer = null;
+    function showRuleToast(msg) {
+      const toast = document.getElementById('ui-rule-toast');
+      const text = document.getElementById('ui-rule-toast-text');
+      text.textContent = msg;
+      toast.classList.remove('opacity-0', '-translate-y-2');
+      toast.classList.add('opacity-100', 'translate-y-0');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.add('opacity-0', '-translate-y-2');
+        toast.classList.remove('opacity-100', 'translate-y-0');
+      }, 3200);
+    }
+
+    function appendDiceLog(message, colorClass = 'text-slate-300') {
+      const logContainer = document.getElementById('ui-dice-log');
+      const item = document.createElement('div');
+      item.className = `leading-snug border-l-2 border-amber-500/50 pl-2 py-0.5 ${colorClass}`;
+      item.textContent = message;
+      logContainer.appendChild(item);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    function updateAllUI() {
+      const hpPct = Math.max(0, (GameState.player.hp / GameState.player.maxHp) * 100);
+      document.getElementById('ui-hp-text').textContent = `${GameState.player.hp} / ${GameState.player.maxHp}`;
+      document.getElementById('ui-hp-bar').style.width = `${hpPct}%`;
+      document.getElementById('ui-pos-text').textContent = `(${GameState.player.gridX}, ${GameState.player.gridZ})`;
+      document.getElementById('ui-potion-count').textContent = `${GameState.player.potions}`;
+
+      const sceneObj = DELIAN_TOMB_SCENARIO.scenes[GameState.currentScene];
+      if (sceneObj) {
+        document.getElementById('ui-scene-title').textContent = sceneObj.title;
+      }
+
+      const stealthBtn = document.getElementById('btn-toggle-stealth');
+      const stealthBtnText = document.getElementById('ui-stealth-btn-text');
+      if (GameState.mode === 'EXPLORATION' && GameState.isStealth) {
+        stealthBtnText.textContent = '潛行視野：開啟';
+        stealthBtn.className = 'inline-flex items-center gap-1 text-xs bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-400/80 px-2 py-1 rounded-md transition active:scale-95 cursor-pointer stealth-glow';
+      } else {
+        stealthBtnText.textContent = '潛行視野：關閉';
+        stealthBtn.className = 'inline-flex items-center gap-1 text-xs bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-600/70 px-2 py-1 rounded-md transition active:scale-95 cursor-pointer';
+      }
+
+      const modeText = document.getElementById('ui-game-mode');
+      const modeDot = document.getElementById('mode-indicator-dot');
+      const combatPanel = document.getElementById('combat-resource-panel');
+      const gridHint = document.getElementById('ui-grid-hint');
+      const targetSwitcherHint = document.getElementById('ui-combat-target-switcher');
+
+      if (GameState.mode === 'COMBAT') {
+        modeText.textContent = '戰鬥模式 (Combat)';
+        modeText.className = 'text-xs sm:text-sm font-bold text-rose-400 tracking-wide';
+        modeDot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping';
+        combatPanel.classList.remove('hidden');
+        targetSwitcherHint.classList.remove('hidden');
+        gridHint.textContent = `戰鬥中每格消耗 1 格移動力 (剩餘 ${GameState.player.movement} 格)｜近戰需距離 ≤ 1 格｜拖曳或按 Q/E 轉動視角`;
+
+        document.getElementById('ui-turn-number').textContent = `${GameState.turn}`;
+        document.getElementById('ui-action-Points').textContent = `${GameState.player.actions} / ${GameState.player.maxActions}`;
+        document.getElementById('ui-move-points').textContent = `${GameState.player.movement} / ${GameState.player.maxMovement} 格`;
+      } else if (GameState.isStealth) {
+        modeText.textContent = '探索・潛行中 (Stealth)';
+        modeText.className = 'text-xs sm:text-sm font-bold text-emerald-300 tracking-wide';
+        modeDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+        combatPanel.classList.add('hidden');
+        targetSwitcherHint.classList.add('hidden');
+        gridHint.textContent = '潛行中已顯示敵人紅色扇形視野範圍！避開視野移動可獲暗殺優勢｜拖曳或按 Q/E 轉動視角';
+      } else {
+        modeText.textContent = '探索模式 (Exploration)';
+        modeText.className = 'text-xs sm:text-sm font-bold text-sky-300 tracking-wide';
+        modeDot.className = 'w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse';
+        combatPanel.classList.add('hidden');
+        targetSwitcherHint.classList.add('hidden');
+        gridHint.textContent = '輕點網格自由平滑移動 (Lerp)｜按住滑鼠拖曳或按 Q/E 鍵可 360° 旋轉視角';
+      }
+
+      const aliveEnemies = GameState.enemies.filter(e => e.alive);
+      document.getElementById('ui-enemies-remaining').textContent = `敵方存活: ${aliveEnemies.length}`;
+
+      const selectedTarget = aliveEnemies.find(e => e.id === GameState.selectedEnemyId) || aliveEnemies[0];
+      if (selectedTarget) {
+        GameState.selectedEnemyId = selectedTarget.id;
+        const { gridDist } = getDistancesToEnemy(selectedTarget);
+        document.getElementById('ui-selected-target-name').textContent = `${selectedTarget.name} (HP ${selectedTarget.hp}/${selectedTarget.maxHp})`;
+        const distEl = document.getElementById('ui-selected-target-dist');
+        distEl.textContent = `距離 ${gridDist} 格 (${gridDist * 5}呎)`;
+        distEl.className = gridDist <= 1 ? 'text-emerald-400 font-bold' : 'text-amber-300';
+      } else if (GameState.currentScene === 'scene_b') {
+        document.getElementById('ui-selected-target-name').textContent = GameState.doorOpened
+          ? '藍黑色騎士雕像 (Z=-43)'
+          : '古老石門 (Z=-30)';
+        const targetZ = GameState.doorOpened ? -43 : -30;
+        const distToObj = Math.abs(GameState.player.gridZ - targetZ);
+        document.getElementById('ui-selected-target-dist').textContent = `距離 ${distToObj} 格`;
+      } else {
+        document.getElementById('ui-selected-target-name').textContent = '無存活敵人';
+        document.getElementById('ui-selected-target-dist').textContent = '安全';
+      }
+
+      updateTargetSelectionVisuals();
+      renderActionButtons();
+    }
+
+    function renderActionButtons() {
+      const container = document.getElementById('ui-action-buttons');
+      container.innerHTML = '';
+
+      if (GameState.mode === 'COMBAT') {
+        const aliveEnemies = GameState.enemies.filter(e => e.alive);
+        const target = aliveEnemies.find(e => e.id === GameState.selectedEnemyId) || aliveEnemies[0];
+        const { gridDist } = getDistancesToEnemy(target);
+        const inMeleeRange = gridDist <= 1;
+
+        const atkBtn = document.createElement('button');
+        atkBtn.type = 'button';
+        const canAttack = !GameState.isEnemyTurn && GameState.player.actions > 0;
+        atkBtn.className = `px-3.5 py-2 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition shadow-lg ${
+          !canAttack
+            ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+            : inMeleeRange
+            ? 'bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white border border-amber-300/60 cursor-pointer active:scale-95'
+            : 'bg-slate-800/90 hover:bg-rose-950/70 text-rose-300 border border-rose-500/50 cursor-pointer'
+        }`;
+        atkBtn.innerHTML = `
+          <span>⚔️ [近戰攻擊] 長劍斬擊</span>
+          <span class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-black/30">
+            ${inMeleeRange ? '射程內 (1格)' : `距離 ${gridDist} 格 (過遠)`}
+          </span>
+        `;
+        atkBtn.addEventListener('click', executePlayerMeleeAttack);
+        container.appendChild(atkBtn);
+
+        aliveEnemies.forEach(enemy => {
+          const isSelected = enemy.id === GameState.selectedEnemyId;
+          const dist = getDistancesToEnemy(enemy).gridDist;
+          const targetBtn = document.createElement('button');
+          targetBtn.type = 'button';
+          targetBtn.className = `px-2.5 py-2 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 ${
+            isSelected
+              ? 'bg-emerald-950/90 border-emerald-400 text-emerald-200 shadow'
+              : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700'
+          }`;
+          targetBtn.innerHTML = `🎯 ${enemy.name} <span class="font-mono text-[10px] text-amber-300">(${dist}格)</span>`;
+          targetBtn.addEventListener('click', () => selectEnemyTarget(enemy.id));
+          container.appendChild(targetBtn);
+        });
+
+        const endTurnBtn = document.createElement('button');
+        endTurnBtn.type = 'button';
+        endTurnBtn.disabled = GameState.isEnemyTurn;
+        endTurnBtn.className = `ml-auto px-4 py-2 rounded-xl font-bold text-xs sm:text-sm border transition ${
+          GameState.isEnemyTurn
+            ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-wait'
+            : 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-300 shadow-lg cursor-pointer active:scale-95'
+        }`;
+        endTurnBtn.textContent = GameState.isEnemyTurn ? '⏳ 敵方行動中...' : '⏭️ 結束回合 (End Turn)';
+        endTurnBtn.addEventListener('click', endPlayerTurn);
+        container.appendChild(endTurnBtn);
+        return;
+      }
+
+      const sceneObj = DELIAN_TOMB_SCENARIO.scenes[GameState.currentScene];
+      if (!sceneObj) return;
+      const nodeObj = sceneObj.nodes[GameState.currentNode];
+      if (!nodeObj || !nodeObj.options) return;
+
+      nodeObj.options.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        let styleClasses = 'bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-600';
+        if (opt.style === 'combat') {
+          styleClasses = 'bg-gradient-to-r from-rose-700 to-amber-700 hover:from-rose-600 hover:to-amber-600 text-white border-amber-400/60 shadow-lg';
+        } else if (opt.style === 'skill') {
+          styleClasses = 'bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white border-emerald-400/60 shadow-lg';
+        } else if (opt.style === 'explore') {
+          styleClasses = 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white border-blue-400/60 shadow-lg';
+        }
+
+        btn.className = `px-3.5 py-2 rounded-xl font-bold text-xs sm:text-sm border transition cursor-pointer active:scale-95 ${styleClasses}`;
+        btn.textContent = opt.label;
+        btn.addEventListener('click', () => handleStoryOptionClick(opt.action));
+        container.appendChild(btn);
+      });
+    }
+
+    function handleStoryOptionClick(actionCode) {
+      if (actionCode === 'ENTER_COMBAT_DIRECT') {
+        SoundFX.dice();
+        appendDiceLog(`[劇情選擇] 你拔出長劍發起正面突襲！兩隻哥布林舉起武器迎戰！`, 'text-amber-300 font-bold');
+        enterCombatMode(
+          '你大步踏入火光範圍，長劍出鞘的寒光映照在哥布林驚愕的臉上！戰鬥正式開始，請點擊地面網格移動至哥布林身旁（1 格內）發動攻擊！'
+        );
+      } else if (actionCode === 'SKILL_CHECK_STEALTH') {
+        executeStealthAssassination();
+      } else if (actionCode === 'TOGGLE_STEALTH_MODE') {
+        toggleStealthMode();
+      } else if (actionCode === 'GOTO_SCENE_B') {
+        transitionToSceneB();
+      } else if (actionCode === 'INSPECT_STONE_DOOR') {
+        const d20 = rollDie(20);
+        const wisMod = 1;
+        const total = d20 + wisMod;
+        SoundFX.dice();
+        document.getElementById('ui-last-dice-badge').textContent = `D20(${d20})+1 = ${total}`;
+        if (total >= 11) {
+          appendDiceLog(
+            `[感知檢定] D20(${d20}) + 感知(1) = ${total} vs DC(11)... 成功！你察覺石門後的地板中央似乎設有壓力板機關。`,
+            'text-emerald-400 font-bold'
+          );
+          showRuleToast('感知成功：你聽見石門後寂靜無聲，但中央地板似乎暗藏機關！');
+        } else {
+          appendDiceLog(
+            `[感知檢定] D20(${d20}) + 感知(1) = ${total} vs DC(11)... 未發現異常，石門後一片死寂。`,
+            'text-slate-400'
+          );
+        }
+      } else if (actionCode === 'PUSH_OPEN_STONE_DOOR') {
+        pushOpenStoneDoor();
+      } else if (actionCode === 'TRIGGER_PRESSURE_PLATE') {
+        triggerPressurePlateTrap();
+      } else if (actionCode === 'DRINK_POTION_NODE') {
+        useHealingPotion();
+      } else if (actionCode === 'GO_TO_STATUE_PUZZLE') {
+        goToStatueOathPuzzle();
+      } else if (
+        actionCode === 'OATH_SOLVE_SUCCESS' ||
+        actionCode === 'OATH_SOLVE_FAIL_TRAP' ||
+        actionCode === 'OATH_SOLVE_FAIL_GUARDIAN'
+      ) {
+        resolveStatueOath(actionCode);
+      } else if (actionCode === 'CLAIM_DELIAN_REWARD') {
+        GameState.holySwordEquipped = true;
+        GameState.player.hp = GameState.player.maxHp;
+        document.getElementById('ui-weapon-badge').innerHTML =
+          `🗡️ 迪利安聖光劍 <span class="text-amber-300 font-mono text-[11px]">(1d8+4)</span>`;
+        document.getElementById('badge-delian-relic').classList.remove('hidden');
+        document.getElementById('badge-delian-relic').classList.add('inline-flex');
+        SoundFX.victory();
+        appendDiceLog(
+          `[獲得聖物] 你裝備了【迪利安聖光長劍 (+1)】，生命值完全恢復至 12/12！你可點擊地板自由探索或重置劇本。`,
+          'text-amber-300 font-bold'
+        );
+        spawnFloatingText(GameState.player.gridX, GameState.player.gridZ, `✨ 聖光長劍裝備！HP 全滿！`, 'text-amber-300 font-extrabold text-sm');
+        updateAllUI();
+      } else if (actionCode === 'SHORT_REST') {
+        GameState.player.hp = GameState.player.maxHp;
+        GameState.player.potions = 1;
+        SoundFX.victory();
+        appendDiceLog(`[營火短休] 你在溫暖的營火旁包紮傷口，HP 恢復至 ${GameState.player.maxHp}/12，並補充了治療藥水。`, 'text-emerald-400 font-bold');
+        updateAllUI();
+      } else if (actionCode === 'SPAWN_PATROL') {
+        spawnEnemiesFromScenario([
+          {
+            id: 'goblin_patrol_1',
+            name: '哥布林掠奪者 A',
+            gridX: -2,
+            gridZ: -5,
+            hp: 9,
+            maxHp: 9,
+            ac: 13,
+            atkBonus: 4,
+            dmgDice: 6,
+            dmgMod: 2,
+            color: 0x10b981,
+            baseFacingAngle: Math.PI * 0.4,
+            visionRange: 3.4,
+            visionAngle: Math.PI * 0.55
+          },
+          {
+            id: 'goblin_patrol_2',
+            name: '哥布林暗箭手 B',
+            gridX: 2,
+            gridZ: -5,
+            hp: 7,
+            maxHp: 7,
+            ac: 12,
+            atkBonus: 4,
+            dmgDice: 6,
+            dmgMod: 2,
+            color: 0x059669,
+            baseFacingAngle: Math.PI * 0.6,
+            visionRange: 3.4,
+            visionAngle: Math.PI * 0.55
+          }
+        ]);
+        enterCombatMode('古墓階梯下方衝出了兩隻哥布林巡邏兵！準備迎戰！');
+      } else if (actionCode === 'RESET_SCENARIO') {
+        resetScenarioToStart();
+      }
+    }
+
+    function resetScenarioToStart() {
+      const startScene = DELIAN_TOMB_SCENARIO.scenes.scene_a;
+      GameState.mode = 'EXPLORATION';
+      GameState.isStealth = true;
+      GameState.currentScene = 'scene_a';
+      GameState.currentNode = 'entrance_start';
+      GameState.turn = 1;
+      GameState.isEnemyTurn = false;
+      GameState.stealthAttempted = false;
+      GameState.doorOpened = false;
+      GameState.trapTriggered = false;
+      GameState.oathSolved = false;
+      GameState.holySwordEquipped = false;
+
+      if (sceneBPointLight) {
+        scene.remove(sceneBPointLight);
+        sceneBPointLight = null;
+      }
+      buildSceneB();
+
+      GameState.player.hp = GameState.player.maxHp;
+      GameState.player.potions = 1;
+      GameState.player.gridX = startScene.playerStart.x;
+      GameState.player.gridZ = startScene.playerStart.z;
+      GameState.player.actions = GameState.player.maxActions;
+      GameState.player.movement = GameState.player.maxMovement;
+
+      playerTargetWorldPos.set(startScene.playerStart.x, 0, startScene.playerStart.z);
+      if (playerMesh) {
+        playerMesh.position.copy(playerTargetWorldPos);
+      }
+      if (playerModelContainer) {
+        playerModelContainer.rotation.y = Math.PI;
+      }
+      if (rangeRingGroup) rangeRingGroup.visible = false;
+
+      document.getElementById('ui-weapon-badge').innerHTML =
+        `⚔️ 長劍 <span class="text-amber-400 font-mono text-[11px]">(1d8+3)</span>`;
+      document.getElementById('badge-stealth-buff').classList.add('hidden');
+      document.getElementById('badge-stealth-buff').classList.remove('inline-flex');
+      document.getElementById('badge-delian-relic').classList.add('hidden');
+      document.getElementById('badge-delian-relic').classList.remove('inline-flex');
+      document.getElementById('ui-last-dice-badge').textContent = 'D20 待命';
+
+      const logContainer = document.getElementById('ui-dice-log');
+      logContainer.innerHTML = '';
+      appendDiceLog('📜 已透過 ModelLoader (GLTFLoader) 載入 3D 模型資產與《迪利安之墓》。', 'text-amber-300 font-semibold');
+      appendDiceLog('👁️ 【潛行狀態】已顯示哥布林的扇形視野範圍！按住滑鼠拖曳或按 Q/E 可自由轉動視角。', 'text-emerald-400');
+
+      setSceneNarrativeFromCurrentNode();
+      spawnEnemiesFromScenario();
+      updateAllUI();
+    }
+
+    /********************************************************************
+     * 8. Three.js 高效動畫迴圈 (requestAnimationFrame) 與視窗自適應
+     ********************************************************************/
+    let animationFrameId = null;
+    const clock = new THREE.Clock();
+
+    function animate() {
+      animationFrameId = requestAnimationFrame(animate);
+      const elapsedTime = clock.getElapsedTime();
+
+      if (playerMesh) {
+        playerMesh.position.lerp(playerTargetWorldPos, 0.12);
+
+        if (playerRingMesh) {
+          const s = 1 + Math.sin(elapsedTime * 4) * 0.05;
+          playerRingMesh.scale.set(s, s, 1);
+        }
+
+        CameraOrbit.yaw += (CameraOrbit.targetYaw - CameraOrbit.yaw) * 0.14;
+        CameraOrbit.pitch += (CameraOrbit.targetPitch - CameraOrbit.pitch) * 0.14;
+        CameraOrbit.distance += (CameraOrbit.targetDistance - CameraOrbit.distance) * 0.14;
+
+        const dynamicOffset = getCameraOffsetVector();
+        const desiredCamPos = playerMesh.position.clone().add(dynamicOffset);
+        camera.position.lerp(desiredCamPos, 0.12);
+
+        const targetLook = playerMesh.position.clone().add(new THREE.Vector3(0, 0.45, 0));
+        currentLookAt.lerp(targetLook, 0.14);
+        camera.lookAt(currentLookAt);
+      }
+
+      if (campfireLight && campfireFlameMesh) {
+        campfireLight.intensity = 3.0 + Math.sin(elapsedTime * 11) * 0.35 + Math.cos(elapsedTime * 17) * 0.2;
+        const flameScaleY = 1 + Math.sin(elapsedTime * 14) * 0.16;
+        const flameScaleXZ = 1 + Math.cos(elapsedTime * 10) * 0.08;
+        campfireFlameMesh.scale.set(flameScaleXZ, flameScaleY, flameScaleXZ);
+        campfireFlameMesh.rotation.y = elapsedTime * 1.5;
+      }
+
+      if (sceneBPointLight && !GameState.oathSolved) {
+        sceneBPointLight.intensity = 1.35 + Math.sin(elapsedTime * 3.5) * 0.12;
+      }
+
+      GameState.enemies.forEach((enemy, idx) => {
+        if (!enemy.alive) return;
+        const group = enemyMeshes.get(enemy.id);
+        if (!group) return;
+
+        const modelRoot = group.getObjectByName('enemyModelRoot');
+        if (modelRoot) {
+          modelRoot.position.y = Math.abs(Math.sin(elapsedTime * 3 + idx * 1.5)) * 0.05;
+        }
+        const ring = group.getObjectByName('selectionRing');
+        if (ring && ring.visible) {
+          ring.rotation.z = elapsedTime * 2;
+        }
+
+        const visionGroup = group.getObjectByName('visionConeGroup');
+        if (visionGroup) {
+          visionGroup.visible = (GameState.mode === 'EXPLORATION' && GameState.isStealth);
+          if (visionGroup.visible) {
+            const sweepOffset = Math.sin(elapsedTime * 1.1 + idx * 2.1) * 0.28;
+            enemy.currentFacingAngle = enemy.baseFacingAngle + sweepOffset;
+            visionGroup.rotation.y = -enemy.currentFacingAngle;
+
+            if (modelRoot) {
+              modelRoot.rotation.y = Math.PI / 2 - enemy.currentFacingAngle;
+            }
+
+            const coneFill = visionGroup.getObjectByName('visionConeFill');
+            if (coneFill && coneFill.material) {
+              coneFill.material.opacity = 0.22 + Math.sin(elapsedTime * 4) * 0.06;
+            }
+          }
+        }
+      });
+
+      updateWorldLabelsPosition();
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      if (!camera || !renderer) return;
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // 顯示/隱藏 Loading 畫面輔助函數
+    function showLoadingOverlay() {
+      const loadingScreen = document.getElementById('ui-loading-screen');
+      if (loadingScreen) {
+        loadingScreen.style.display = 'flex';
+        loadingScreen.classList.remove('opacity-0', 'pointer-events-none');
+        loadingScreen.classList.add('opacity-100');
+      }
+    }
+
+    function hideLoadingOverlay() {
+      const loadingScreen = document.getElementById('ui-loading-screen');
+      if (loadingScreen) {
+        loadingScreen.classList.remove('opacity-100');
+        loadingScreen.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => {
+          loadingScreen.style.display = 'none';
+        }, 720);
+      }
+    }
+
+    // 【4. 啟動流程：先顯示全螢幕黑色 Loading 畫面，待所有 GLTF 模型載入完畢後淡出並啟動遊戲迴圈】
+    window.onload = async function () {
+      await ModelLoader.loadAllModels();
+
+      initThreeJS();
+      resetScenarioToStart();
+
+      document.getElementById('btn-use-potion').addEventListener('click', useHealingPotion);
+      document.getElementById('btn-reset-game').addEventListener('click', resetScenarioToStart);
+      document.getElementById('btn-toggle-stealth').addEventListener('click', () => toggleStealthMode());
+
+      document.getElementById('btn-cam-left').addEventListener('click', () => rotateCameraBy(-Math.PI / 6));
+      document.getElementById('btn-cam-right').addEventListener('click', () => rotateCameraBy(Math.PI / 6));
+      document.getElementById('btn-cam-reset').addEventListener('click', resetCameraOrbit);
+
+      const audioBtn = document.getElementById('btn-toggle-audio');
+      audioBtn.addEventListener('click', () => {
+        SoundFX.muted = !SoundFX.muted;
+        audioBtn.textContent = SoundFX.muted ? '🔇' : '🔊';
+      });
+
+      // 綁定「📦 模型網址」設定彈窗，方便即時貼上自訂 .glb URL 重新載入
+      const modal = document.getElementById('ui-model-url-modal');
+      const openModalBtn = document.getElementById('btn-open-model-modal');
+      const closeModalBtn = document.getElementById('btn-close-model-modal');
+      const cancelModalBtn = document.getElementById('btn-cancel-model-modal');
+      const applyModalBtn = document.getElementById('btn-apply-model-urls');
+
+      const closeModal = () => modal.classList.add('hidden');
+      openModalBtn.addEventListener('click', () => {
+        document.getElementById('input-url-player').value = URL_MODEL_PLAYER;
+        document.getElementById('input-url-goblin').value = URL_MODEL_GOBLIN;
+        document.getElementById('input-url-campfire').value = URL_MODEL_CAMPFIRE;
+        modal.classList.remove('hidden');
+      });
+      closeModalBtn.addEventListener('click', closeModal);
+      cancelModalBtn.addEventListener('click', closeModal);
+      applyModalBtn.addEventListener('click', async () => {
+        URL_MODEL_PLAYER = document.getElementById('input-url-player').value.trim();
+        URL_MODEL_GOBLIN = document.getElementById('input-url-goblin').value.trim();
+        URL_MODEL_CAMPFIRE = document.getElementById('input-url-campfire').value.trim();
+        closeModal();
+        showLoadingOverlay();
+        await ModelLoader.loadAllModels();
+        buildDungeonProps();
+        buildPlayerToken();
+        spawnEnemiesFromScenario();
+        hideLoadingOverlay();
+        appendDiceLog('✨ 已重新執行 ModelLoader.loadAllModels() 套用最新 .glb 模型設定！', 'text-emerald-400 font-bold');
+      });
+
+      hideLoadingOverlay();
+
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animate();
+    };
+  </script>
+</body>
+</html>
